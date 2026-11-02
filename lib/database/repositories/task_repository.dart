@@ -4,12 +4,12 @@ import '../models/task.dart';
 
 class TaskRepository {
   Future<int> add(Task task) async {
-    final db = await AppDatabase.instance.database;
+    final db = await ZoeDatabase.instance.database;
     return db.insert(StorageConstants.tasksTable, task.toMap()..remove('id'));
   }
 
   Future<List<Task>> getAll() async {
-    final db = await AppDatabase.instance.database;
+    final db = await ZoeDatabase.instance.database;
     final rows = await db.query(
       StorageConstants.tasksTable,
       orderBy: 'created_at DESC',
@@ -18,7 +18,7 @@ class TaskRepository {
   }
 
   Future<void> complete(int id) async {
-    final db = await AppDatabase.instance.database;
+    final db = await ZoeDatabase.instance.database;
     await db.update(
       StorageConstants.tasksTable,
       {

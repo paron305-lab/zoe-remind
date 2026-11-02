@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../core/theme/app_theme.dart';
-import 'router.dart';
+import 'package:zoe_remind/app/router.dart';
+import 'package:zoe_remind/core/theme/app_theme.dart';
 
 class ZoeApp extends StatelessWidget {
   const ZoeApp({super.key});
@@ -8,11 +8,10 @@ class ZoeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Zoe-Remind',
+      title: 'Zoe',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: appRouter,
     );
   }
 }
-

@@ -1,22 +1,25 @@
 import 'package:flutter/material.dart';
-import 'colors.dart';
-import 'dimensions.dart';
+import 'package:zoe_remind/core/theme/colors.dart';
+import 'package:zoe_remind/core/theme/dimensions.dart';
 
 class AppTheme {
+  AppTheme._();
+
   static ThemeData light() {
     return ThemeData(
       useMaterial3: true,
-      scaffoldBackgroundColor: AppColors.cream,
+      fontFamily: 'Poppins',
+      scaffoldBackgroundColor: ZoeColors.cream,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.lavender,
-        primary: AppColors.lavender,
-        secondary: AppColors.mint,
-        error: AppColors.coral,
+        seedColor: ZoeColors.lavender,
+        primary: ZoeColors.lavender,
+        secondary: ZoeColors.mint,
+        error: ZoeColors.coral,
         surface: Colors.white,
       ),
       textTheme: ThemeData.light().textTheme.apply(
-            bodyColor: AppColors.ink,
-            displayColor: AppColors.ink,
+            bodyColor: ZoeColors.ink,
+            displayColor: ZoeColors.ink,
           ),
       cardTheme: CardThemeData(
         color: Colors.white,
@@ -28,4 +31,3 @@ class AppTheme {
     );
   }
 }
-
