@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:zoe_remind/core/widgets/zoe_bottom_nav.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/chat/screens/zoe_chat_screen.dart';
 import 'package:zoe_remind/features/home/screens/home_screen.dart';
@@ -43,25 +44,21 @@ final appRouter = GoRouter(
     ),
     StatefulShellRoute.indexedStack(
       builder: (context, state, shell) => Scaffold(
-        body: SafeArea(child: shell),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: shell.currentIndex,
-          onDestinationSelected: (i) =>
+        // No SafeArea here — each screen handles its own top inset,
+        // so Home's gradient can sit behind the status bar.
+        body: shell,
+        bottomNavigationBar: ZoeBottomNav(
+          currentIndex: shell.currentIndex,
+          onTap: (i) =>
               shell.goBranch(i, initialLocation: i == shell.currentIndex),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
-            NavigationDestination(icon: Icon(Icons.check_circle_rounded), label: 'Tasks'),
-            NavigationDestination(icon: Icon(Icons.sticky_note_2_rounded), label: 'Notes'),
-            NavigationDestination(icon: Icon(Icons.chat_bubble_rounded), label: 'Chat'),
-            NavigationDestination(icon: Icon(Icons.settings_rounded), label: 'Settings'),
-          ],
         ),
       ),
+      // Order MUST match ZoeBottomNav: Home, Zoe, Tasks, Notes, Settings
       branches: [
         StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (c, s) => const HomeScreen())]),
+        StatefulShellBranch(routes: [GoRoute(path: '/chat', builder: (c, s) => const ZoeChatScreen())]),
         StatefulShellBranch(routes: [GoRoute(path: '/tasks', builder: (c, s) => const TasksScreen())]),
         StatefulShellBranch(routes: [GoRoute(path: '/notes', builder: (c, s) => const NotesScreen())]),
-        StatefulShellBranch(routes: [GoRoute(path: '/chat', builder: (c, s) => const ZoeChatScreen())]),
         StatefulShellBranch(routes: [GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen())]),
       ],
     ),
