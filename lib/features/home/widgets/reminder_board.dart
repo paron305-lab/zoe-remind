@@ -2,16 +2,49 @@ import 'package:flutter/material.dart';
 import 'package:zoe_remind/features/home/models/home_item.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 
-class ReminderBoard extends StatelessWidget {
+class ReminderBoard extends StatefulWidget {
   final List<HomeItem> items;
-  final ValueChanged<HomeItem> onToggle;
 
-  const ReminderBoard({super.key, required this.items, required this.onToggle});
+  /// null = read-only board (no checkboxes), e.g. "Coming up".
+  final ValueChanged<HomeItem>? onToggle;
+  final String emptyText;
+
+  /// Ilang row ang kita bago mag-scroll sa loob ng card.
+  /// .5 = kalahating row para halatang may kasunod pa.
+  final double maxVisibleRows;
+
+  const ReminderBoard({
+    super.key,
+    required this.items,
+    this.onToggle,
+    this.emptyText = 'Nothing scheduled yet. Tap + to add one.',
+    this.maxVisibleRows = 3.5,
+  });
+
+  @override
+  State<ReminderBoard> createState() => _ReminderBoardState();
+}
+
+class _ReminderBoardState extends State<ReminderBoard> {
+  static const double _rowHeight = 86; // tinatayang taas ng isang row
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final items = widget.items;
+    final scrollable = items.length > widget.maxVisibleRows;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
+      constraints: BoxConstraints(
+        maxHeight: _rowHeight * widget.maxVisibleRows,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(28),
@@ -26,19 +59,28 @@ class ReminderBoard extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: items.isEmpty
-            ? const Padding(
-                padding: EdgeInsets.all(28),
-                child: Text('Nothing scheduled yet. Tap + to add one.',
-                    style: HomeText.time),
+            ? Padding(
+                padding: const EdgeInsets.all(28),
+                child: Text(widget.emptyText, style: HomeText.time),
               )
-            : Column(
-                children: [
-                  for (var i = 0; i < items.length; i++) ...[
-                    _BoardRow(item: items[i], onToggle: onToggle),
-                    if (i != items.length - 1)
-                      const Divider(height: 1, thickness: 1, color: HomeColors.divider),
-                  ],
-                ],
+            : Scrollbar(
+                controller: _scroll,
+                thumbVisibility: scrollable,
+                radius: const Radius.circular(8),
+                child: ListView.separated(
+                  controller: _scroll,
+                  primary: false,
+                  shrinkWrap: true, // kung kaunti lang, sakto lang ang taas
+                  padding: EdgeInsets.zero,
+                  physics: scrollable
+                      ? const ClampingScrollPhysics()
+                      : const NeverScrollableScrollPhysics(),
+                  itemCount: items.length,
+                  itemBuilder: (context, i) =>
+                      _BoardRow(item: items[i], onToggle: widget.onToggle),
+                  separatorBuilder: (_, __) => const Divider(
+                      height: 1, thickness: 1, color: HomeColors.divider),
+                ),
               ),
       ),
     );
@@ -47,7 +89,7 @@ class ReminderBoard extends StatelessWidget {
 
 class _BoardRow extends StatelessWidget {
   final HomeItem item;
-  final ValueChanged<HomeItem> onToggle;
+  final ValueChanged<HomeItem>? onToggle;
   const _BoardRow({required this.item, required this.onToggle});
 
   @override
@@ -56,10 +98,30 @@ class _BoardRow extends StatelessWidget {
         item.done ? HomeColors.inkSoft.withValues(alpha: 0.6) : HomeColors.ink;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 18, 18),
+      padding: const EdgeInsets.fromLTRB(20, 14, 18, 14),
       child: Row(
         children: [
-          SizedBox(width: 64, child: Text(item.timeLabel, style: HomeText.time)),
+          // Date + time sa kaliwa
+          SizedBox(
+            width: 96, // sapat para sa "Tomorrow" nang hindi dumidikit sa title
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.dateLabel ?? 'Today',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: HomeText.time.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: HomeColors.lavender,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(item.timeLabel, style: HomeText.time),
+              ],
+            ),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,7 +142,8 @@ class _BoardRow extends StatelessWidget {
               ],
             ),
           ),
-          ZoeCheckbox(checked: item.done, onTap: () => onToggle(item)),
+          if (onToggle != null)
+            ZoeCheckbox(checked: item.done, onTap: () => onToggle!(item)),
         ],
       ),
     );

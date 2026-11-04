@@ -26,16 +26,26 @@ class HomeItem {
   final HomeItemType type;
   final bool done;
 
+  /// Shown above the time for items that aren't today ("Tomorrow", "Nov 8").
+  final String? dateLabel;
+
   const HomeItem({
     required this.id,
     required this.title,
     required this.time,
     required this.type,
     this.done = false,
+    this.dateLabel,
   });
 
-  HomeItem copyWith({bool? done}) =>
-      HomeItem(id: id, title: title, time: time, type: type, done: done ?? this.done);
+  HomeItem copyWith({bool? done}) => HomeItem(
+        id: id,
+        title: title,
+        time: time,
+        type: type,
+        done: done ?? this.done,
+        dateLabel: dateLabel,
+      );
 
   String get timeLabel =>
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';

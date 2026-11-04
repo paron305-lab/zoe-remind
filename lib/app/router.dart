@@ -6,6 +6,7 @@ import 'package:zoe_remind/features/chat/screens/zoe_chat_screen.dart';
 import 'package:zoe_remind/features/home/screens/home_screen.dart';
 import 'package:zoe_remind/features/notes/screens/notes_screen.dart';
 import 'package:zoe_remind/features/onboarding/screens/onboarding_screen.dart';
+import 'package:zoe_remind/features/reminders/screens/new_reminder_screen.dart';
 import 'package:zoe_remind/features/settings/screens/settings_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/tasks_screen.dart';
 
@@ -42,6 +43,14 @@ final appRouter = GoRouter(
         },
       ),
     ),
+
+    // New Reminder — outside the shell → full screen, no bottom nav.
+    // Opened from the + button on Home: context.push('/reminders/new')
+    GoRoute(
+      path: '/reminders/new',
+      builder: (context, state) => const NewReminderScreen(),
+    ),
+
     StatefulShellRoute.indexedStack(
       builder: (context, state, shell) => Scaffold(
         // No SafeArea here — each screen handles its own top inset,

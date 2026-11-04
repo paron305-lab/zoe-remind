@@ -16,7 +16,7 @@ class ZoeDatabase {
   /// v1: settings, model_state
   /// v2: user_profile
   /// v3: tasks
-  static const _version = 3;
+  static const _version = 4;
 
   Future<Database>? _opening;
 
@@ -81,6 +81,27 @@ class ZoeDatabase {
         completed_at TEXT
       )
     ''');
+
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.remindersTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
+        repeat TEXT NOT NULL DEFAULT 'none',
+        status TEXT NOT NULL DEFAULT 'pending',
+        last_done_date TEXT,
+        notification_state TEXT NOT NULL DEFAULT 'not_scheduled',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      )
+    ''');
+
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reminders_date '
+      'ON ${StorageConstants.remindersTable} (date)',
+    );
 
     await batch.commit(noResult: true);
   }
