@@ -8,6 +8,7 @@ import 'package:zoe_remind/features/notes/screens/notes_screen.dart';
 import 'package:zoe_remind/features/onboarding/screens/onboarding_screen.dart';
 import 'package:zoe_remind/features/reminders/screens/new_reminder_screen.dart';
 import 'package:zoe_remind/features/settings/screens/settings_screen.dart';
+import 'package:zoe_remind/features/tasks/screens/task_form_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/tasks_screen.dart';
 
 /// True once onboarding is saved. Set in main.dart at startup;
@@ -49,6 +50,19 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/reminders/new',
       builder: (context, state) => const NewReminderScreen(),
+    ),
+
+    // New / Edit Task — also full screen, no bottom nav.
+    // From the Tasks + button: context.push('/tasks/new')
+    // Tapping a task:          context.push('/tasks/edit/<id>')
+    GoRoute(
+      path: '/tasks/new',
+      builder: (context, state) => const TaskFormScreen(),
+    ),
+    GoRoute(
+      path: '/tasks/edit/:id',
+      builder: (context, state) =>
+          TaskFormScreen(taskId: int.tryParse(state.pathParameters['id'] ?? '')),
     ),
 
     StatefulShellRoute.indexedStack(

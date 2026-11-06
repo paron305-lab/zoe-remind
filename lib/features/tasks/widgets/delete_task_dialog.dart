@@ -1,0 +1,42 @@
+import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
+
+/// Delete always asks first (risk tier: DELETE ONE). Returns true only on "Delete".
+Future<bool> confirmDeleteTask(BuildContext context, String title) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      title: const Text(
+        'Delete this task?',
+        style: TextStyle(
+            fontFamily: 'Poppins', fontWeight: FontWeight.w700, color: HomeColors.ink),
+      ),
+      content: Text(
+        '"$title" will be removed. Hindi na ito maibabalik.',
+        style: const TextStyle(
+            fontFamily: 'Poppins', fontSize: 15, color: HomeColors.inkSoft, height: 1.4),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel',
+              style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w700,
+                  color: HomeColors.inkSoft)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Delete',
+              style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w700,
+                  color: HomeColors.coral)),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
+}

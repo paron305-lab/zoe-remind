@@ -16,7 +16,9 @@ class ZoeDatabase {
   /// v1: settings, model_state
   /// v2: user_profile
   /// v3: tasks
-  static const _version = 4;
+  /// v4: reminders
+  /// v5: tasks.category + tasks.updated_at, completion_history
+  static const _version = 5;
 
   Future<Database>? _opening;
 
@@ -29,8 +31,30 @@ class ZoeDatabase {
       path,
       version: _version,
       onCreate: (db, version) => _createAllTables(db),
-      onUpgrade: (db, oldVersion, newVersion) => _createAllTables(db),
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await _createAllTables(db);
+        await _migrate(db, oldVersion);
+      },
     );
+  }
+
+  /// Column changes for phones that already have an older zoe.db.
+  /// (CREATE TABLE IF NOT EXISTS can't add columns to an existing table.)
+  static Future<void> _migrate(Database db, int oldVersion) async {
+    if (oldVersion < 5) {
+      await _addColumnIfMissing(
+          db, StorageConstants.tasksTable, 'category', "TEXT NOT NULL DEFAULT 'other'");
+      await _addColumnIfMissing(db, StorageConstants.tasksTable, 'updated_at', 'TEXT');
+    }
+  }
+
+  static Future<void> _addColumnIfMissing(
+      Database db, String table, String column, String definition) async {
+    final cols = await db.rawQuery('PRAGMA table_info($table)');
+    final exists = cols.any((c) => c['name'] == column);
+    if (!exists) {
+      await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+    }
   }
 
   /// Every table uses IF NOT EXISTS, so this is safe to run on
@@ -68,6 +92,7 @@ class ZoeDatabase {
     ''');
 
     // Columns follow the architecture doc's tasks table.
+    // date 'yyyy-MM-dd' and time 'HH:mm' are optional (no date = "Someday").
     batch.execute('''
       CREATE TABLE IF NOT EXISTS ${StorageConstants.tasksTable} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,11 +101,35 @@ class ZoeDatabase {
         date TEXT,
         time TEXT,
         priority TEXT,
+        category TEXT NOT NULL DEFAULT 'other',
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT,
+        updated_at TEXT,
         completed_at TEXT
       )
     ''');
+
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_tasks_date '
+      'ON ${StorageConstants.tasksTable} (date)',
+    );
+
+    // Append-only log of finished items, for "Ano natapos ko last week?".
+    // item_type is 'task' for now; reminders can log here later.
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.completionHistoryTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_type TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        completed_at TEXT NOT NULL
+      )
+    ''');
+
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_history_completed_at '
+      'ON ${StorageConstants.completionHistoryTable} (completed_at)',
+    );
 
     batch.execute('''
       CREATE TABLE IF NOT EXISTS ${StorageConstants.remindersTable} (
