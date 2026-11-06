@@ -40,6 +40,33 @@ class Reminder {
     this.completedAt,
   });
 
+  /// Copy with some fields changed. Use the clear… flags to set a field to null.
+  Reminder copyWith({
+    String? title,
+    String? date,
+    String? time,
+    ReminderRepeat? repeat,
+    String? status,
+    String? lastDoneDate,
+    bool clearLastDoneDate = false,
+    String? updatedAt,
+    String? completedAt,
+    bool clearCompletedAt = false,
+  }) =>
+      Reminder(
+        id: id,
+        title: title ?? this.title,
+        date: date ?? this.date,
+        time: time ?? this.time,
+        repeat: repeat ?? this.repeat,
+        status: status ?? this.status,
+        lastDoneDate: clearLastDoneDate ? null : (lastDoneDate ?? this.lastDoneDate),
+        notificationState: notificationState,
+        createdAt: createdAt,
+        updatedAt: updatedAt ?? this.updatedAt,
+        completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
+      );
+
   Map<String, Object?> toMap() => {
         'id': id,
         'title': title,

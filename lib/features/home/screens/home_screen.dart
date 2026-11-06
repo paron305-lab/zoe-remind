@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
+import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
@@ -11,6 +12,8 @@ import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/home/widgets/reminder_board.dart';
 import 'package:zoe_remind/features/home/widgets/timeline_stats.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_fab.dart';
+import 'package:zoe_remind/features/reminders/screens/reminder_form_screen.dart';
+import 'package:zoe_remind/features/reminders/widgets/delete_reminder_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -47,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
         type: HomeItemType.reminder,
         done: r.isDoneOn(day),
         dateLabel: showDate ? ZoeDate.relative(day) : null,
+        repeats: r.repeat != ReminderRepeat.none,
       );
 
   Future<void> _loadItems() async {
@@ -80,14 +84,48 @@ class _HomeScreenState extends State<HomeScreen> {
     await _reminders.setDoneOn(id, DateTime.now(), !item.done);
   }
 
+  // ---------- delete (swipe left) ----------
+
+  Future<bool> _confirmDelete(HomeItem item) =>
+      confirmDeleteReminder(context, item.title, repeats: item.repeats);
+
+  Future<void> _delete(HomeItem item) async {
+    final id = int.tryParse(item.id);
+    if (id == null) return;
+    // remove right away (a repeating one can be in both lists)
+    setState(() {
+      _today = _today.where((i) => i.id != item.id).toList();
+      _upcoming = _upcoming.where((i) => i.id != item.id).toList();
+    });
+    try {
+      await _reminders.delete(id);
+      if (mounted) ZoeSnack.show(context, 'Reminder deleted');
+    } catch (e) {
+      debugPrint('Deleting reminder failed: $e');
+      if (mounted) ZoeSnack.show(context, "Couldn't delete the reminder.", error: true);
+    }
+    await _loadItems();
+  }
+
+  // ---------- navigation ----------
+
   Future<void> _openNewReminder() async {
-    final created = await context.push<bool>('/reminders/new');
-    if (created == true) {
-      await _loadItems();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reminder saved ✨')),
-      );
+    final result = await context.push<String>('/reminders/new');
+    if (result == null) return;
+    await _loadItems();
+    if (mounted) ZoeSnack.show(context, 'Reminder saved ✨');
+  }
+
+  Future<void> _openEdit(HomeItem item) async {
+    final result = await context.push<String>('/reminders/edit/${item.id}');
+    if (result == null) return;
+    await _loadItems();
+    if (!mounted) return;
+    switch (result) {
+      case ReminderFormResult.updated:
+        ZoeSnack.show(context, 'Changes saved ✨');
+      case ReminderFormResult.deleted:
+        ZoeSnack.show(context, 'Reminder deleted');
     }
   }
 
@@ -126,7 +164,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         )
                       else
-                        ReminderBoard(items: _today, onToggle: _toggle),
+                        ReminderBoard(
+                          items: _today,
+                          onToggle: _toggle,
+                          onTap: _openEdit,
+                          confirmDelete: _confirmDelete,
+                          onDelete: _delete,
+                        ),
                       const SizedBox(height: 20),
                       TimelineStats(tasksLeft: left, reminders: reminders, streak: 7),
                       if (_upcoming.isNotEmpty) ...[
@@ -134,7 +178,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           padding: EdgeInsets.fromLTRB(20, 28, 20, 14),
                           child: Text('Coming up', style: HomeText.sectionTitle),
                         ),
-                        ReminderBoard(items: _upcoming),
+                        ReminderBoard(
+                          items: _upcoming,
+                          onTap: _openEdit,
+                          confirmDelete: _confirmDelete,
+                          onDelete: _delete,
+                        ),
                       ],
                     ],
                   ),

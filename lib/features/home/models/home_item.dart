@@ -29,6 +29,9 @@ class HomeItem {
   /// Shown above the time for items that aren't today ("Tomorrow", "Nov 8").
   final String? dateLabel;
 
+  /// Repeating reminder (daily / weekly / monthly) — delete removes every repeat.
+  final bool repeats;
+
   const HomeItem({
     required this.id,
     required this.title,
@@ -36,6 +39,7 @@ class HomeItem {
     required this.type,
     this.done = false,
     this.dateLabel,
+    this.repeats = false,
   });
 
   HomeItem copyWith({bool? done}) => HomeItem(
@@ -45,6 +49,7 @@ class HomeItem {
         type: type,
         done: done ?? this.done,
         dateLabel: dateLabel,
+        repeats: repeats,
       );
 
   String get timeLabel =>

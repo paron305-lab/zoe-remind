@@ -13,6 +13,22 @@ class ReminderRepository {
   }
 
   /// All reminders that happen on [day] (one-time + repeating), sorted by time.
+    Future<Reminder?> getById(int id) async {
+    final db = await ZoeDatabase.instance.database;
+    final rows = await db.query(_table, where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : Reminder.fromMap(rows.first);
+  }
+
+  Future<void> update(Reminder r) async {
+    final db = await ZoeDatabase.instance.database;
+    await db.update(
+      _table,
+      r.toMap()..remove('id'),
+      where: 'id = ?',
+      whereArgs: [r.id],
+    );
+  }
+  
   Future<List<Reminder>> getForDay(DateTime day) async {
     final db = await ZoeDatabase.instance.database;
     final key = ZoeDate.key(day);

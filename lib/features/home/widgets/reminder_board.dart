@@ -7,6 +7,15 @@ class ReminderBoard extends StatefulWidget {
 
   /// null = read-only board (no checkboxes), e.g. "Coming up".
   final ValueChanged<HomeItem>? onToggle;
+
+  /// Tap a row → edit it. null = rows aren't tappable.
+  final ValueChanged<HomeItem>? onTap;
+
+  /// Swipe a row left → ask first ([confirmDelete]), then [onDelete].
+  /// Both null = no swipe-to-delete.
+  final Future<bool> Function(HomeItem)? confirmDelete;
+  final ValueChanged<HomeItem>? onDelete;
+
   final String emptyText;
 
   /// Ilang row ang kita bago mag-scroll sa loob ng card.
@@ -17,6 +26,9 @@ class ReminderBoard extends StatefulWidget {
     super.key,
     required this.items,
     this.onToggle,
+    this.onTap,
+    this.confirmDelete,
+    this.onDelete,
     this.emptyText = 'Nothing scheduled yet. Tap + to add one.',
     this.maxVisibleRows = 3.5,
   });
@@ -33,6 +45,28 @@ class _ReminderBoardState extends State<ReminderBoard> {
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  Widget _buildRow(HomeItem item) {
+    final row = _BoardRow(item: item, onToggle: widget.onToggle, onTap: widget.onTap);
+    final confirm = widget.confirmDelete;
+    final onDelete = widget.onDelete;
+    if (confirm == null || onDelete == null) return row;
+
+    return Dismissible(
+      // same reminder can show on several days in "Coming up" → add the day
+      key: ValueKey('board-${item.id}-${item.dateLabel ?? 'today'}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => confirm(item),
+      onDismissed: (_) => onDelete(item),
+      background: Container(
+        color: HomeColors.coralLight,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 28),
+        child: const Icon(Icons.delete_outline_rounded, color: HomeColors.coral, size: 28),
+      ),
+      child: row,
+    );
   }
 
   @override
@@ -76,8 +110,7 @@ class _ReminderBoardState extends State<ReminderBoard> {
                       ? const ClampingScrollPhysics()
                       : const NeverScrollableScrollPhysics(),
                   itemCount: items.length,
-                  itemBuilder: (context, i) =>
-                      _BoardRow(item: items[i], onToggle: widget.onToggle),
+                  itemBuilder: (context, i) => _buildRow(items[i]),
                   separatorBuilder: (_, __) => const Divider(
                       height: 1, thickness: 1, color: HomeColors.divider),
                 ),
@@ -90,10 +123,20 @@ class _ReminderBoardState extends State<ReminderBoard> {
 class _BoardRow extends StatelessWidget {
   final HomeItem item;
   final ValueChanged<HomeItem>? onToggle;
-  const _BoardRow({required this.item, required this.onToggle});
+  final ValueChanged<HomeItem>? onTap;
+  const _BoardRow({required this.item, required this.onToggle, this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final row = _content();
+    if (onTap == null) return row;
+    return Material(
+      color: Colors.white,
+      child: InkWell(onTap: () => onTap!(item), child: row),
+    );
+  }
+
+  Widget _content() {
     final titleColor =
         item.done ? HomeColors.inkSoft.withValues(alpha: 0.6) : HomeColors.ink;
 
