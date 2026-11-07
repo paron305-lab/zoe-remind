@@ -13,6 +13,7 @@ dependencies:
   sqflite: ^2.4.1
   path: ^1.9.0
   go_router: ^18.1.2
+  alarm: ^5.10.0
 
 dev_dependencies:
   flutter_test:
@@ -33,6 +34,9 @@ flutter:
     - assets/images/zoe/reminding/
     - assets/images/zoe/celebrating/
     - assets/prompts/
+    - assets/images/logo/
+    - assets/music/
+    
 
   fonts:
     - family: Poppins

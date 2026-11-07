@@ -1,3 +1,4 @@
+import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/widgets/zoe_bottom_nav.dart';
@@ -7,6 +8,7 @@ import 'package:zoe_remind/features/home/screens/home_screen.dart';
 import 'package:zoe_remind/features/notes/screens/notes_screen.dart';
 import 'package:zoe_remind/features/onboarding/screens/onboarding_screen.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_form_screen.dart';
+import 'package:zoe_remind/features/reminders/screens/reminder_ringing_screen.dart';
 import 'package:zoe_remind/features/settings/screens/settings_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/task_form_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/tasks_screen.dart';
@@ -56,6 +58,16 @@ final appRouter = GoRouter(
       path: '/reminders/edit/:id',
       builder: (context, state) =>
           ReminderFormScreen(reminderId: int.tryParse(state.pathParameters['id'] ?? '')),
+    ),
+
+    // Ringing reminder — full screen, no bottom nav.
+    // Opened automatically by ReminderAlarmService when an alarm rings.
+    GoRoute(
+      path: '/ringing',
+      redirect: (context, state) =>
+          state.extra is AlarmSettings ? null : '/home', // walang alarm → Home
+      builder: (context, state) =>
+          ReminderRingingScreen(alarm: state.extra! as AlarmSettings),
     ),
 
     // New / Edit Task — also full screen, no bottom nav.
