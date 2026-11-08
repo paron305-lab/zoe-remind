@@ -24,6 +24,7 @@ class MainActivity : FlutterActivity() {
                     // Ringing screen sa ibabaw ng lock screen
                     "showOverLockScreen" -> { setLockScreenMode(true); result.success(null) }
                     "clearLockScreen" -> { setLockScreenMode(false); result.success(null) }
+                    "bringToFront" -> result.success(bringToFront())
 
                     // Reminder Setup (permissions para sa lahat ng brand)
                     "manufacturer" -> result.success(Build.MANUFACTURER.lowercase())
@@ -55,6 +56,22 @@ class MainActivity : FlutterActivity() {
         }
         if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    /**
+     * Ilabas ang Zoe sa harap kahit nasa ibang app / home screen ang user.
+     * Pinapayagan lang ito ng Android kung naka-allow ang "Display over other apps".
+     */
+    private fun bringToFront(): Boolean = try {
+        val i = Intent(applicationContext, MainActivity::class.java).addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+        applicationContext.startActivity(i)
+        true
+    } catch (e: Exception) {
+        false
     }
 
     // ───────────────────────── Helpers ─────────────────────────

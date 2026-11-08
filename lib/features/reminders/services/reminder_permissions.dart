@@ -17,6 +17,10 @@ enum SetupItem {
   /// Hindi papatayin ng battery saver ang alarm.
   battery,
 
+  /// "Display over other apps": lalabas ang buong screen ni Zoe kahit
+  /// unlocked ang phone at nasa ibang app / home screen ang user.
+  overlay,
+
   /// Xiaomi / Oppo / Vivo / Huawei / Samsung / Infinix …: Autostart at
   /// background permissions. Walang API para i-check, kaya kinukumpirma ng user.
   autostart,
@@ -86,6 +90,7 @@ class ReminderPermissions {
       ok[SetupItem.fullScreen] = await _call<bool>('canUseFullScreenIntent') ?? true;
     }
     ok[SetupItem.battery] = await _call<bool>('isIgnoringBatteryOptimizations') ?? true;
+    ok[SetupItem.overlay] = (await Permission.systemAlertWindow.status).isGranted;
     if (isOemBrand(manufacturer)) {
       ok[SetupItem.autostart] = await _settings.getValue(_kAutostart) == 'true';
     }
@@ -119,6 +124,8 @@ class ReminderPermissions {
         await _call<bool>('openFullScreenIntentSettings');
       case SetupItem.battery:
         await _call<bool>('requestIgnoreBatteryOptimizations');
+      case SetupItem.overlay:
+        await Permission.systemAlertWindow.request(); // bubuksan ang Settings
       case SetupItem.autostart:
         await _call<bool>('openAutoStart');
     }

@@ -66,6 +66,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
         SetupItem.exactAlarm => 'Alarms & reminders',
         SetupItem.fullScreen => 'Full screen notifications',
         SetupItem.battery => 'Battery: Unrestricted',
+        SetupItem.overlay => 'Display over other apps',
         SetupItem.autostart => 'Autostart at background',
       };
 
@@ -76,6 +77,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
           'Para lumabas ang screen ni Zoe kahit naka-lock ang phone.',
         SetupItem.battery =>
           'Para hindi patayin ng battery saver ang alarm. Piliin ang "Allow".',
+        SetupItem.overlay =>
+          'Para lumabas ang buong screen ni Zoe kahit gamit mo ang phone '
+          '(nasa ibang app o home screen). Hanapin ang Zoe at i-ON.',
         SetupItem.autostart => _autostartTip(_status?.manufacturer ?? ''),
       };
 
@@ -84,6 +88,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
         SetupItem.exactAlarm => Icons.alarm_rounded,
         SetupItem.fullScreen => Icons.fullscreen_rounded,
         SetupItem.battery => Icons.battery_charging_full_rounded,
+        SetupItem.overlay => Icons.picture_in_picture_alt_rounded,
         SetupItem.autostart => Icons.rocket_launch_rounded,
       };
 

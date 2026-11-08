@@ -11,6 +11,7 @@ import 'package:zoe_remind/app/router.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
+import 'package:zoe_remind/database/repositories/settings_repository.dart';
 
 /// Info na pinapakita sa ringing screen (galing sa payload).
 class RingInfo {
@@ -30,7 +31,16 @@ class ReminderAlarmService {
   static const List<int> snoozeOptions = [5, 10, 30];
   static const MethodChannel _lockChannel = MethodChannel('zoe/alarm_screen');
 
+  /// Kulay ng notification (lavender na may pagka-blue).
+  static const Color notifColor = Color(0xFF7B8CE6);
+  static const _kEnabled = 'reminders_enabled';
+
   final _repo = ReminderRepository();
+  final _settings = SettingsRepository();
+
+  /// Master switch ng reminders (bell button sa Home).
+  /// true = tutunog, false = walang alarm na ise-set.
+  final ValueNotifier<bool> enabled = ValueNotifier(true);
   StreamSubscription<AlarmSet>? _ringSub;
   int? _showingId;
 
@@ -58,6 +68,43 @@ class ReminderAlarmService {
     _ringSub ??= Alarm.ringing.listen(_onRinging);
   }
 
+  // ───────────────────────── ON / OFF (bell sa Home) ─────────────────────────
+
+  /// Basahin ang naka-save na ON/OFF (default ON).
+  Future<bool> loadEnabled() async {
+    try {
+      enabled.value = await _settings.getValue(_kEnabled) != 'false';
+    } catch (e) {
+      lastError = 'Load enabled failed: $e';
+    }
+    return enabled.value;
+  }
+
+  /// OFF → burahin lahat ng alarm. ON → i-schedule ulit lahat.
+  Future<void> setEnabled(bool on) async {
+    enabled.value = on;
+    await _settings.setValue(_kEnabled, on ? 'true' : 'false');
+    if (on) {
+      await syncAll();
+    } else {
+      await _stopAllScheduled();
+    }
+    changes.value++;
+  }
+
+  Future<void> _stopAllScheduled() async {
+    try {
+      for (final a in await Alarm.getAlarms()) {
+        if (await Alarm.isRinging(a.id)) continue; // hayaan ang nagri-ring
+        await Alarm.stop(a.id);
+        if (a.id != testAlarmId) await _repo.setNotificationState(a.id, 'not_scheduled');
+      }
+    } catch (e) {
+      lastError = 'Stop all failed: $e';
+      debugPrint(lastError);
+    }
+  }
+
   Future<void> _onRinging(AlarmSet set) async {
     if (set.alarms.isEmpty) return;
     final alarm = set.alarms.first;
@@ -65,6 +112,9 @@ class ReminderAlarmService {
     _showingId = alarm.id;
 
     await _setLockScreen(true);
+    // Kung unlocked at nasa ibang app: ilabas si Zoe sa harap
+    // (gumagana kung naka-allow ang "Display over other apps").
+    await _invoke('bringToFront');
 
     // Hintayin na ready ang router (lalo na kung bagong bukas ang app).
     SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -78,6 +128,10 @@ class ReminderAlarmService {
   /// Hindi ginagalaw ang alarm na naka-schedule na (hal. naka-snooze)
   /// o kasalukuyang nagri-ring.
   Future<void> syncAll() async {
+    if (!await loadEnabled()) {
+      await _stopAllScheduled(); // naka-OFF ang reminders
+      return;
+    }
     try {
       final reminders = await _repo.getAll();
       final ids = reminders.map((r) => r.id).whereType<int>().toSet();
@@ -154,7 +208,7 @@ class ReminderAlarmService {
   Future<void> _scheduleNext(Reminder r, {DateTime? from}) async {
     final id = r.id;
     if (id == null) return;
-    final at = nextFireTime(r, from: from);
+    final at = enabled.value ? nextFireTime(r, from: from) : null;
     if (at == null) {
       await _repo.setNotificationState(id, 'not_scheduled');
       return;
@@ -189,6 +243,7 @@ class ReminderAlarmService {
         title: 'Zoe Reminder',
         body: title,
         androidStopAlarmOnDismiss: false, // bawal patayin sa swipe ng notif
+        iconColor: notifColor, // lavender-blue
       ),
     );
     await Alarm.set(alarmSettings: settings);
@@ -245,6 +300,14 @@ class ReminderAlarmService {
   }
 
   // ───────────────────────── Helpers ─────────────────────────
+
+  Future<void> _invoke(String method) async {
+    try {
+      await _lockChannel.invokeMethod(method);
+    } catch (_) {
+      // Ibang platform / walang channel — ok lang.
+    }
+  }
 
   Future<void> _setLockScreen(bool on) async {
     try {

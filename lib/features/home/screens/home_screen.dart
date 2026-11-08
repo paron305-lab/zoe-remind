@@ -30,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<HomeItem> _today = const [];
   List<HomeItem> _upcoming = const [];
   bool _loading = true;
+  bool _remindersOn = true;
 
   @override
   void initState() {
@@ -38,6 +39,26 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadItems();
     // Done / Snooze / Dismiss sa ringing screen -> i-refresh ang Home
     ReminderAlarmService.instance.changes.addListener(_loadItems);
+    _loadRemindersOn();
+  }
+
+  // ---------- bell: reminders ON / OFF ----------
+
+  Future<void> _loadRemindersOn() async {
+    final on = await ReminderAlarmService.instance.loadEnabled();
+    if (mounted) setState(() => _remindersOn = on);
+  }
+
+  Future<void> _toggleReminders() async {
+    final on = !_remindersOn;
+    setState(() => _remindersOn = on); // palitan agad ang kulay
+    HapticFeedback.lightImpact();
+    await ReminderAlarmService.instance.setEnabled(on);
+    if (!mounted) return;
+    ZoeSnack.show(
+      context,
+      on ? 'Reminders ON 🔔 — tutunog na si Zoe' : 'Reminders OFF 🔕 — walang tutunog',
+    );
   }
 
   @override
@@ -160,7 +181,13 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.only(bottom: 100),
             child: Column(
               children: [
-                HomeHeader(userName: _userName, total: _today.length, done: done),
+                HomeHeader(
+                  userName: _userName,
+                  total: _today.length,
+                  done: done,
+                  remindersOn: _remindersOn,
+                  onBellTap: _toggleReminders,
+                ),
                 // iaangat ng 44px para pumatong ang board sa header
                 Transform.translate(
                   offset: const Offset(0, -44),

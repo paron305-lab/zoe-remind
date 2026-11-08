@@ -8,12 +8,16 @@ class HomeHeader extends StatelessWidget {
   final int done;
   final VoidCallback? onBellTap;
 
+  /// Naka-ON ba ang reminders (green bell) o OFF (gray bell).
+  final bool remindersOn;
+
   const HomeHeader({
     super.key,
     required this.userName,
     required this.total,
     required this.done,
     this.onBellTap,
+    this.remindersOn = true,
   });
 
   String _greeting() {
@@ -67,7 +71,7 @@ class HomeHeader extends StatelessWidget {
                   ],
                 ),
               ),
-              _BellButton(onTap: onBellTap),
+              _BellButton(on: remindersOn, onTap: onBellTap),
             ],
           ),
           const SizedBox(height: 22),
@@ -100,22 +104,52 @@ class HomeHeader extends StatelessWidget {
   }
 }
 
+/// Reminders ON/OFF switch.
+/// ON  = green na may tunog na bell.
+/// OFF = gray na may guhit na bell.
 class _BellButton extends StatelessWidget {
+  final bool on;
   final VoidCallback? onTap;
-  const _BellButton({this.onTap});
+  const _BellButton({required this.on, this.onTap});
+
+  static const _offGray = Color(0xFF9E9CAE);
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.22),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: const SizedBox(
-          width: 56,
-          height: 56,
-          child: Icon(Icons.notifications_none_rounded, color: Colors.white, size: 28),
+    return Tooltip(
+      message: on ? 'Reminders ON' : 'Reminders OFF',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: on ? HomeColors.mint : _offGray,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: (on ? HomeColors.mint : _offGray).withValues(alpha: 0.35),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: onTap,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Icon(
+                on ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
+                key: ValueKey(on),
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
         ),
       ),
     );
