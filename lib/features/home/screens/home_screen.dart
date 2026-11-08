@@ -124,9 +124,11 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final now = DateTime.now();
       final today = ZoeDate.dayOnly(now);
+      final active = await ReminderAlarmService.instance.activeAlarmOccurrences();
+      // Lumipas na araw na walang Done / Dismiss → i-save as Missed sa database.
+      await _reminders.recordMissed(pending: active, now: now);
       final todayList = await _reminders.getForDay(today);
       final upcoming = await _reminders.getUpcoming(days: 30);
-      final active = await ReminderAlarmService.instance.activeAlarmOccurrences();
       if (!mounted) return;
       setState(() {
         _today = [

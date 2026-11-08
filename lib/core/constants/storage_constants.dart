@@ -5,6 +5,7 @@ class StorageConstants {
   static const tasksTable = 'tasks';
   static const remindersTable = 'reminders';
   static const completionHistoryTable = 'completion_history';
+  static const reminderOccurrencesTable = 'reminder_occurrences';
   static const notesTable = 'notes';
   static const eventsTable = 'events';
   static const conversationsTable = 'conversations';
