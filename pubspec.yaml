@@ -14,6 +14,7 @@ dependencies:
   path: ^1.9.0
   go_router: ^18.1.2
   alarm: ^5.10.0
+  cupertino_icons: ^1.0.8
 
 dev_dependencies:
   flutter_test:
@@ -27,16 +28,14 @@ flutter:
   assets:
     - assets/images/logo/
     - assets/images/icons/
-    - assets\images\backgrounds/
+    - assets/images/backgrounds/
     - assets/images/zoe/idle/
     - assets/images/zoe/happy/
     - assets/images/zoe/thinking/
     - assets/images/zoe/reminding/
     - assets/images/zoe/celebrating/
     - assets/prompts/
-    - assets/images/logo/
     - assets/music/
-    
 
   fonts:
     - family: Poppins

@@ -7,6 +7,9 @@ import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/reminders/widgets/delete_reminder_dialog.dart';
+import 'package:zoe_remind/features/reminders/screens/reminder_setup_screen.dart';
+import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 import 'package:zoe_remind/features/reminders/widgets/new_reminder_widgets.dart';
 
 enum _QuickPick { today, tomorrow, weekend, custom }
@@ -263,7 +266,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
     try {
       final original = _original;
       if (original == null) {
-        await _repo.add(Reminder(
+        final newId = await _repo.add(Reminder(
           title: _cleanTitle,
           date: _dateKey!,
           time: _timeKey!,
@@ -271,6 +274,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
           createdAt: now,
           updatedAt: now,
         ));
+        await ReminderAlarmService.instance.syncById(newId); // schedule alarm
       } else {
         // Moving it to a new date/time makes it "not done" again.
         final reset = _whenChanged;
@@ -284,6 +288,14 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
           clearLastDoneDate: reset,
           clearCompletedAt: reset,
         ));
+        await ReminderAlarmService.instance.syncById(original.id!); // reschedule alarm
+      }
+      if (!mounted) return;
+      // May kulang na permission? Ipakita muna ang Reminder Setup.
+      if (await ReminderPermissions.instance.shouldPrompt() && mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ReminderSetupScreen()),
+        );
       }
       if (!mounted) return;
       context.pop(original == null ? ReminderFormResult.created : ReminderFormResult.updated);
@@ -309,6 +321,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
 
     try {
       await _repo.delete(id);
+      await ReminderAlarmService.instance.cancel(id); // cancel alarm
       if (!mounted) return;
       context.pop(ReminderFormResult.deleted);
     } catch (e) {

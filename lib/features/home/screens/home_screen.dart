@@ -13,6 +13,7 @@ import 'package:zoe_remind/features/home/widgets/reminder_board.dart';
 import 'package:zoe_remind/features/home/widgets/timeline_stats.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_fab.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_form_screen.dart';
+import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/widgets/delete_reminder_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -35,6 +36,14 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadName();
     _loadItems();
+    // Done / Snooze / Dismiss sa ringing screen -> i-refresh ang Home
+    ReminderAlarmService.instance.changes.addListener(_loadItems);
+  }
+
+  @override
+  void dispose() {
+    ReminderAlarmService.instance.changes.removeListener(_loadItems);
+    super.dispose();
   }
 
   Future<void> _loadName() async {
@@ -82,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ];
     });
     await _reminders.setDoneOn(id, DateTime.now(), !item.done);
+    await ReminderAlarmService.instance.syncById(id); // cancel o next day
   }
 
   // ---------- delete (swipe left) ----------
@@ -99,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       await _reminders.delete(id);
+      await ReminderAlarmService.instance.cancel(id); // cancel alarm
       if (mounted) ZoeSnack.show(context, 'Reminder deleted');
     } catch (e) {
       debugPrint('Deleting reminder failed: $e');

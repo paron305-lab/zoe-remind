@@ -71,6 +71,14 @@ class SettingsRepository {
     });
   }
 
+  /// Generic key/value sa settings table (hal. Reminder Setup flags).
+  Future<String?> getValue(String key) => _get(key);
+
+  Future<void> setValue(String key, String value) async {
+    final db = await _db.database;
+    await _put(db, key, value, DateTime.now().toIso8601String());
+  }
+
   Future<String?> _get(String key) async {
     final db = await _db.database;
     final rows = await db.query('settings',

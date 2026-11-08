@@ -9,10 +9,13 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Alarm.init(); // bago mag-runApp
 
+  // Read the database before the first screen, so new users
+  // land on onboarding and returning users land on Home.
   onboardingDone.value = await SettingsRepository().isOnboardingDone();
 
   runApp(const ZoeApp());
 
-  // Makikinig kapag nagri-ring na → bubuksan ang ringing screen
-  ReminderAlarmService.instance.startListening();
+  final alarms = ReminderAlarmService.instance;
+  alarms.startListening(); // nagri-ring -> bubuksan ang ringing screen
+  alarms.syncAll(); // lagyan ng alarm ang lahat ng pending reminders
 }

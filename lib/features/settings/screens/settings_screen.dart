@@ -1,7 +1,8 @@
 import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:zoe_remind/features/reminders/screens/reminder_setup_screen.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 
 /// TEMPORARY: "Alarm Check" screen para ma-debug ang reminders sa phone
 /// (walang logs ang release APK). Papalitan ng totoong Settings mamaya.
@@ -19,8 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   static const _ink = Color(0xFF2B2A3D);
   static const _cream = Color(0xFFFBF6EF);
 
-  PermissionStatus? _notif;
-  PermissionStatus? _exact;
+  SetupStatus? _setup;
   List<AlarmSettings> _alarms = const [];
   String _result = '';
   bool _testing = false;
@@ -45,8 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   }
 
   Future<void> _refresh() async {
-    final notif = await Permission.notification.status;
-    final exact = await Permission.scheduleExactAlarm.status;
+    final setup = await ReminderPermissions.instance.check();
     var alarms = <AlarmSettings>[];
     var result = _result;
     try {
@@ -57,8 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     }
     if (!mounted) return;
     setState(() {
-      _notif = notif;
-      _exact = exact;
+      _setup = setup;
       _alarms = alarms;
       _result = result;
     });
@@ -105,26 +103,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   style: TextStyle(fontFamily: 'Poppins', color: Colors.black54)),
               const SizedBox(height: 20),
 
-              _section('1. Permissions'),
-              _permRow('Notifications', _notif, () async {
-                await Permission.notification.request();
-                await _refresh();
-              }),
-              _permRow('Alarms & reminders (exact alarm)', _exact, () async {
-                await Permission.scheduleExactAlarm.request(); // bubuksan ang Settings
-                await _refresh();
-              }),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: openAppSettings,
-                icon: const Icon(Icons.settings_rounded),
-                label: const Text('Buksan ang App Settings ng Zoe'),
-              ),
-              const Text(
-                'Doon: i-ON ang Full screen notifications, gawing Unrestricted ang Battery, '
-                'at i-ON ang Autostart (Xiaomi / Oppo / Vivo / Realme / Infinix).',
-                style: TextStyle(fontSize: 12, color: Colors.black54),
-              ),
+              _section('1. Reminder Setup (permissions)'),
+              _setupCard(),
               const SizedBox(height: 24),
 
               _section('2. Test'),
@@ -184,17 +164,35 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 fontFamily: 'Poppins', fontSize: 16, fontWeight: FontWeight.w700, color: _ink)),
       );
 
-  Widget _permRow(String label, PermissionStatus? status, VoidCallback onAllow) {
-    final granted = status?.isGranted ?? false;
+  Widget _setupCard() {
+    final s = _setup;
+    if (s == null) return const Card(child: ListTile(title: Text('checking…')));
+    final color = s.allOk ? _mint : (s.criticalOk ? const Color(0xFFF0AA45) : _coral);
     return Card(
-      child: ListTile(
-        leading: Icon(
-          granted ? Icons.check_circle_rounded : Icons.cancel_rounded,
-          color: granted ? _mint : _coral,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${s.readyCount}/${s.items.length} ready · ${s.manufacturer} · SDK ${s.sdkInt}',
+                style: TextStyle(fontWeight: FontWeight.w700, color: color)),
+            const SizedBox(height: 6),
+            for (final i in s.items)
+              Text('${s.isOk(i) ? '✅' : '❌'}  ${i.name}', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: _lavender),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ReminderSetupScreen()),
+                );
+                await _refresh();
+              },
+              icon: const Icon(Icons.tune_rounded),
+              label: const Text('Buksan ang Reminder Setup'),
+            ),
+          ],
         ),
-        title: Text(label),
-        subtitle: Text(status == null ? 'checking…' : status.name),
-        trailing: granted ? null : TextButton(onPressed: onAllow, child: const Text('Allow')),
       ),
     );
   }
