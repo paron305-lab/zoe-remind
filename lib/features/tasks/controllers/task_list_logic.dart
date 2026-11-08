@@ -16,7 +16,7 @@ class TaskGroup {
   final String label;
   final List<Task> tasks;
 
-  /// Red-ish header for overdue tasks.
+  /// Coral header for missed tasks.
   final bool warn;
 
   /// Show the date on each card (sections that mix several days).
@@ -30,18 +30,20 @@ class TaskGroup {
 class TaskListLogic {
   TaskListLogic._();
 
-  static bool matches(Task t, String query) {
+  /// [categoryLabel] = pangalan ng category ng task (para ma-search din ito).
+  static bool matches(Task t, String query, {String Function(String key)? categoryLabel}) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return true;
+    final cat = categoryLabel?.call(t.category) ?? t.category;
     return t.title.toLowerCase().contains(q) ||
         (t.description?.toLowerCase().contains(q) ?? false) ||
-        t.category.label.toLowerCase().contains(q);
+        cat.toLowerCase().contains(q);
   }
 
-  /// Today  = due today + anything still overdue.
+  /// Today  = due today + anything still missed from earlier days.
   /// Upcoming = not done, due after today, plus "Someday" tasks.
   static List<Task> applyFilter(List<Task> tasks, TaskFilter filter, DateTime now,
-      {String query = ''}) {
+      {String query = '', String Function(String key)? categoryLabel}) {
     final today = ZoeDate.dayOnly(now);
     bool keep(Task t) {
       final day = t.day;
@@ -54,7 +56,9 @@ class TaskListLogic {
       };
     }
 
-    return tasks.where((t) => keep(t) && matches(t, query)).toList();
+    return tasks
+        .where((t) => keep(t) && matches(t, query, categoryLabel: categoryLabel))
+        .toList();
   }
 
   static List<TaskGroup> group(List<Task> tasks, TaskFilter filter, DateTime now) {
@@ -65,7 +69,7 @@ class TaskListLogic {
     final today = ZoeDate.dayOnly(now);
     final tomorrow = today.add(const Duration(days: 1));
 
-    final overdue = <Task>[];
+    final missed = <Task>[]; // not done, date already passed
     final earlier = <Task>[]; // done, date already passed
     final someday = <Task>[];
     final byDay = <DateTime, List<Task>>{};
@@ -75,15 +79,15 @@ class TaskListLogic {
       if (day == null) {
         someday.add(t);
       } else if (day.isBefore(today)) {
-        (t.isDone ? earlier : overdue).add(t);
+        (t.isDone ? earlier : missed).add(t);
       } else {
         byDay.putIfAbsent(day, () => []).add(t);
       }
     }
 
     final groups = <TaskGroup>[];
-    if (overdue.isNotEmpty) {
-      groups.add(TaskGroup('Overdue', _sortByDateTime(overdue), warn: true, showDate: true));
+    if (missed.isNotEmpty) {
+      groups.add(TaskGroup('Missed', _sortByDateTime(missed), warn: true, showDate: true));
     }
     for (final day in byDay.keys.toList()..sort()) {
       final label = ZoeDate.sameDay(day, today)

@@ -3,17 +3,22 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/task.dart';
+import 'package:zoe_remind/database/models/task_category.dart';
+import 'package:zoe_remind/database/repositories/task_category_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/reminders/widgets/new_reminder_widgets.dart';
+import 'package:zoe_remind/features/tasks/widgets/category_sheet.dart';
 import 'package:zoe_remind/features/tasks/widgets/delete_task_dialog.dart';
-import 'package:zoe_remind/features/tasks/widgets/task_styles.dart';
 
 enum _QuickPick { today, tomorrow, weekend, noDate, custom }
 
 /// New Task / Edit Task. Opened from the + button (new) or by tapping a
 /// task (edit). Pops `true` when something was saved or deleted so the
 /// Tasks screen knows to reload.
+///
+/// History 🔒 task (done, at lumipas na ang araw) → read-only:
+/// walang edit, walang delete.
 class TaskFormScreen extends StatefulWidget {
   /// null = create a new task
   final int? taskId;
@@ -28,6 +33,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
   static const _maxNotes = 1000;
 
   final _repo = TaskRepository();
+  final _categoryRepo = TaskCategoryRepository();
   final _title = TextEditingController();
   final _notes = TextEditingController();
 
@@ -35,7 +41,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
   DateTime? _date;
   TimeOfDay? _time;
   _QuickPick? _pick;
-  TaskCategory _category = TaskCategory.other;
+  TaskCategories _categories = TaskCategories.empty;
+  String _category = Task.defaultCategory;
   TaskPriority _priority = TaskPriority.medium;
 
   bool _loading = false;
@@ -43,16 +50,36 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
   bool get _isEdit => widget.taskId != null;
 
+  /// Done at lumipas na ang araw → history, hindi na mababago.
+  bool get _locked => _original?.isLockedAt(DateTime.now()) ?? false;
+
   @override
   void initState() {
     super.initState();
     _title.addListener(() => setState(() {}));
+    _loading = true;
     if (_isEdit) {
-      _loading = true;
       _loadTask();
     } else {
       _pick = _QuickPick.today;
       _date = _today;
+      _loadCategories(pickDefault: true);
+    }
+  }
+
+  Future<void> _loadCategories({bool pickDefault = false}) async {
+    try {
+      final cats = await _categoryRepo.getLookup();
+      if (!mounted) return;
+      setState(() {
+        _categories = cats;
+        if (pickDefault) _category = cats.defaultKey;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Loading categories failed: $e');
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
@@ -65,6 +92,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
   Future<void> _loadTask() async {
     final task = await _repo.getById(widget.taskId!);
+    final cats = await _categoryRepo.getLookup();
     if (!mounted) return;
     if (task == null) {
       ScaffoldMessenger.of(context)
@@ -78,7 +106,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
       _notes.text = task.description ?? '';
       _date = task.day;
       _time = task.timeOfDay;
-      _category = task.category;
+      _categories = cats;
+      _category = cats.has(task.category) ? task.category : Task.noCategory;
       _priority = task.priority;
       _pick = _pickFor(_date);
       _loading = false;
@@ -180,9 +209,17 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     return originalDay == null || !ZoeDate.sameDay(originalDay, _date!);
   }
 
-  bool get _canSave => _cleanTitle.isNotEmpty && !_isPastDate && !_saving && !_loading;
+  bool get _canSave =>
+      !_locked && _cleanTitle.isNotEmpty && !_isPastDate && !_saving && !_loading;
 
   ZoeHintBanner _banner() {
+    if (_locked) {
+      return const ZoeHintBanner(
+        tone: BannerTone.ok,
+        text: 'Tapos na ito, ',
+        boldText: 'kasama na sa history mo.',
+      );
+    }
     if (_cleanTitle.isEmpty) {
       return const ZoeHintBanner(
         tone: BannerTone.ask,
@@ -210,7 +247,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     return ZoeHintBanner(
       tone: BannerTone.ok,
       text: 'Got it! Task for ',
-      boldText: '$when · ${_category.label}.',
+      boldText: '$when · ${_categories.label(_category)}.',
     );
   }
 
@@ -248,6 +285,10 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
       }
       if (!mounted) return;
       context.pop(true);
+    } on TaskLockedException catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     } catch (e) {
       debugPrint('Saving task failed: $e');
       if (!mounted) return;
@@ -267,11 +308,60 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
       await _repo.delete(original.id!);
       if (!mounted) return;
       context.pop(true);
+    } on TaskLockedException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     } catch (e) {
       debugPrint('Deleting task failed: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Couldn't delete the task.")),
+      );
+    }
+  }
+
+  // ---------- categories ----------
+
+  /// Tap ulit sa naka-select → walang category.
+  void _selectCategory(String key) {
+    setState(() => _category = _category == key ? Task.noCategory : key);
+  }
+
+  Future<void> _addCategory() async {
+    final saved = await showCategorySheet(context);
+    if (saved == null || !mounted) return;
+    await _loadCategories();
+    if (!mounted) return;
+    setState(() => _category = saved.key);
+  }
+
+  Future<void> _categoryMenu(TaskCategory c) async {
+    final action = await showCategoryActions(context, c);
+    if (action == null || !mounted) return;
+    switch (action) {
+      case CategoryAction.edit:
+        final saved = await showCategorySheet(context, existing: c);
+        if (saved != null) await _loadCategories();
+      case CategoryAction.delete:
+        await _deleteCategory(c);
+    }
+  }
+
+  Future<void> _deleteCategory(TaskCategory c) async {
+    try {
+      final count = await _categoryRepo.taskCount(c.key);
+      if (!mounted) return;
+      final ok = await confirmDeleteCategory(context, c.label, count);
+      if (!ok) return;
+      await _categoryRepo.delete(c.key);
+      await _loadCategories();
+      if (!mounted) return;
+      if (_category == c.key) setState(() => _category = Task.noCategory);
+    } catch (e) {
+      debugPrint('Deleting category failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't delete the category.")),
       );
     }
   }
@@ -294,10 +384,16 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                     ReminderBackButton(onTap: () => context.pop(false)),
                     const SizedBox(width: 22),
                     Expanded(
-                      child: Text(_isEdit ? 'Edit Task' : 'New Task',
+                      child: Text(
+                          _locked
+                              ? 'Task'
+                              : _isEdit
+                                  ? 'Edit Task'
+                                  : 'New Task',
                           style: ReminderText.screenTitle),
                     ),
-                    if (_isEdit && _original != null) _DeleteButton(onTap: _delete),
+                    if (_isEdit && _original != null && !_locked)
+                      _DeleteButton(onTap: _delete),
                   ],
                 ),
               ),
@@ -307,14 +403,15 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                         child: CircularProgressIndicator(color: HomeColors.lavender))
                     : _form(),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                child: GradientButton(
-                  label: _isEdit ? 'Save changes' : 'Create task',
-                  loading: _saving,
-                  onTap: _canSave ? _save : null,
+              if (!_locked)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: GradientButton(
+                    label: _isEdit ? 'Save changes' : 'Create task',
+                    loading: _saving,
+                    onTap: _canSave ? _save : null,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -323,6 +420,9 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
   }
 
   Widget _form() {
+    final editable = !_locked;
+    void noop() {}
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
       child: Column(
@@ -335,6 +435,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
             hint: 'e.g. Review Chapter 3',
             maxLength: _maxTitle,
             big: true,
+            enabled: editable,
           ),
           const FieldLabel('Notes (optional)'),
           _InputBox(
@@ -343,6 +444,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
             maxLength: _maxNotes,
             minLines: 3,
             maxLines: 6,
+            enabled: editable,
           ),
           const FieldLabel('When'),
           Row(
@@ -352,7 +454,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                   icon: Icons.calendar_today_outlined,
                   value: _date == null ? null : ZoeDate.pretty(_date!),
                   placeholder: 'No date',
-                  onTap: _pickDate,
+                  onTap: editable ? _pickDate : noop,
                 ),
               ),
               const SizedBox(width: 14),
@@ -361,12 +463,12 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                   icon: Icons.access_time_rounded,
                   value: _time == null ? null : ZoeDate.prettyTime(_time!),
                   placeholder: 'Any time',
-                  onTap: _pickTime,
+                  onTap: editable ? _pickTime : noop,
                 ),
               ),
             ],
           ),
-          if (_time != null)
+          if (_time != null && editable)
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
@@ -392,23 +494,35 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 QuickChip(
                   label: label,
                   selected: _pick == pick,
-                  onTap: () => _applyQuickPick(pick),
+                  onTap: editable ? () => _applyQuickPick(pick) : noop,
                 ),
             ],
           ),
           const FieldLabel('Category'),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              for (final c in TaskCategory.values)
-                _CategoryChip(
-                  category: c,
-                  selected: c == _category,
-                  onTap: () => setState(() => _category = c),
-                ),
-            ],
+          if (_category == Task.noCategory)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                editable
+                    ? 'No category · pumili sa baba o pindutin ang + Add'
+                    : TaskCategories.noneLabel,
+                style: ReminderText.fieldHint.copyWith(fontSize: 14),
+              ),
+            ),
+          _CategoryRow(
+            categories: _categories.list,
+            selected: _category,
+            enabled: editable,
+            onSelect: _selectCategory,
+            onLongPress: _categoryMenu,
+            onAdd: _addCategory,
           ),
+          if (editable && _categories.list.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Long-press a category to edit or delete it.',
+                  style: ReminderText.fieldHint.copyWith(fontSize: 12)),
+            ),
           const FieldLabel('Priority'),
           Row(
             children: [
@@ -417,7 +531,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                   child: _PriorityButton(
                     priority: p,
                     selected: p == _priority,
-                    onTap: () => setState(() => _priority = p),
+                    onTap: editable ? () => setState(() => _priority = p) : null,
                   ),
                 ),
                 if (p != TaskPriority.values.last) const SizedBox(width: 10),
@@ -437,6 +551,7 @@ class _InputBox extends StatelessWidget {
   final bool big;
   final int minLines;
   final int maxLines;
+  final bool enabled;
 
   const _InputBox({
     required this.controller,
@@ -445,6 +560,7 @@ class _InputBox extends StatelessWidget {
     this.big = false,
     this.minLines = 1,
     this.maxLines = 1,
+    this.enabled = true,
   });
 
   @override
@@ -456,6 +572,7 @@ class _InputBox extends StatelessWidget {
 
     return TextField(
       controller: controller,
+      readOnly: !enabled,
       maxLength: maxLength,
       minLines: minLines,
       maxLines: maxLines,
@@ -481,40 +598,45 @@ class _InputBox extends StatelessWidget {
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  final TaskCategory category;
-  final bool selected;
-  final VoidCallback onTap;
-  const _CategoryChip({required this.category, required this.selected, required this.onTap});
+/// Horizontal scroll ng categories + "+ Add" sa dulo.
+class _CategoryRow extends StatelessWidget {
+  final List<TaskCategory> categories;
+  final String selected;
+  final bool enabled;
+  final ValueChanged<String> onSelect;
+  final ValueChanged<TaskCategory> onLongPress;
+  final VoidCallback onAdd;
+
+  const _CategoryRow({
+    required this.categories,
+    required this.selected,
+    required this.enabled,
+    required this.onSelect,
+    required this.onLongPress,
+    required this.onAdd,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final color = TaskColors.category(category);
-    return Material(
-      color: selected ? color.withValues(alpha: 0.16) : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: selected ? color : HomeColors.divider, width: 1.5),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 8),
-              Text(category.label,
-                  style: ReminderText.chip.copyWith(color: HomeColors.ink, fontSize: 14)),
-            ],
-          ),
-        ),
+    return SizedBox(
+      height: 50,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
+        children: [
+          for (final c in categories) ...[
+            CategoryChipView(
+              label: c.label,
+              color: c.colorValue,
+              selected: c.key == selected,
+              enabled: enabled,
+              onTap: () => onSelect(c.key),
+              onLongPress: () => onLongPress(c),
+            ),
+            const SizedBox(width: 10),
+          ],
+          if (enabled) AddCategoryChip(onTap: onAdd),
+        ],
       ),
     );
   }
@@ -523,8 +645,8 @@ class _CategoryChip extends StatelessWidget {
 class _PriorityButton extends StatelessWidget {
   final TaskPriority priority;
   final bool selected;
-  final VoidCallback onTap;
-  const _PriorityButton({required this.priority, required this.selected, required this.onTap});
+  final VoidCallback? onTap; // null = read-only
+  const _PriorityButton({required this.priority, required this.selected, this.onTap});
 
   String get _label => switch (priority) {
         TaskPriority.low => 'Low',

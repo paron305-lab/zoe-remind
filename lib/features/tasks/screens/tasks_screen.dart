@@ -3,11 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/database/models/task.dart';
+import 'package:zoe_remind/database/models/task_category.dart';
+import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/database/repositories/task_category_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_fab.dart';
 import 'package:zoe_remind/features/tasks/controllers/task_list_logic.dart';
+import 'package:zoe_remind/features/tasks/models/task_status.dart';
 import 'package:zoe_remind/features/tasks/widgets/delete_task_dialog.dart';
 import 'package:zoe_remind/features/tasks/widgets/task_card.dart';
 import 'package:zoe_remind/features/tasks/widgets/task_filter_chips.dart';
@@ -15,6 +20,7 @@ import 'package:zoe_remind/features/tasks/widgets/task_styles.dart';
 import 'package:zoe_remind/features/tasks/widgets/tasks_empty_state.dart';
 
 /// Tasks tab: filter chips, tasks grouped by day, + button → New Task screen.
+/// Kada minuto (at pagbalik sa app) chine-check kung may bagong Missed.
 class TasksScreen extends StatefulWidget {
   const TasksScreen({super.key});
 
@@ -22,13 +28,17 @@ class TasksScreen extends StatefulWidget {
   State<TasksScreen> createState() => _TasksScreenState();
 }
 
-class _TasksScreenState extends State<TasksScreen> {
+class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
   static const _snackDuration = Duration(seconds: 2);
 
   final _repo = TaskRepository();
+  final _categoryRepo = TaskCategoryRepository();
   final _search = TextEditingController();
 
   List<Task> _all = const [];
+  TaskCategories _categories = TaskCategories.empty;
+  ZoeLanguage _language = ZoeLanguage.both;
+  Timer? _minuteTimer;
   TaskFilter _filter = TaskFilter.all;
   bool _loading = true;
   bool _failed = false;
@@ -38,12 +48,16 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _search.addListener(() => setState(() {}));
     _load();
+    _minuteTimer = Timer.periodic(const Duration(minutes: 1), (_) => _tick());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _minuteTimer?.cancel();
     _snackTimer?.cancel();
     _search.dispose();
     super.dispose();
@@ -51,12 +65,38 @@ class _TasksScreenState extends State<TasksScreen> {
 
   // ---------- data ----------
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  /// Kada minuto: i-record ang bagong Missed at i-refresh ang labels
+  /// (Missed / 🔒 pagpasok ng bagong araw).
+  Future<void> _tick() async {
+    if (!mounted) return;
+    try {
+      final added = await _repo.recordMissed();
+      if (added > 0) {
+        await _load();
+        return;
+      }
+    } catch (e) {
+      debugPrint('Recording missed tasks failed: $e');
+    }
+    if (mounted) setState(() {});
+  }
+
   Future<void> _load() async {
     try {
+      await _repo.recordMissed();
       final tasks = await _repo.getAll();
+      final categories = await _categoryRepo.getLookup();
+      final language = await SettingsRepository().getLanguage();
       if (!mounted) return;
       setState(() {
         _all = tasks;
+        _categories = categories;
+        _language = language;
         _loading = false;
         _failed = false;
       });
@@ -91,6 +131,10 @@ class _TasksScreenState extends State<TasksScreen> {
 
     try {
       await _repo.setDone(id, nowDone);
+    } on TaskLockedException catch (e) {
+      _replace(task);
+      _snack(e.toString());
+      return;
     } catch (e) {
       debugPrint('Updating task failed: $e');
       _replace(task); // put it back
@@ -121,6 +165,9 @@ class _TasksScreenState extends State<TasksScreen> {
     try {
       await _repo.delete(id);
       _snack('Task deleted');
+    } on TaskLockedException catch (e) {
+      _snack(e.toString());
+      _load();
     } catch (e) {
       debugPrint('Deleting task failed: $e');
       _snack("Couldn't delete the task.");
@@ -132,15 +179,13 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Future<void> _openNew() async {
     final saved = await context.push<bool>('/tasks/new');
-    if (saved == true) {
-      await _load();
-      _snack('Task saved ✨');
-    }
+    await _load(); // reload kahit cancel — baka nag-edit ng categories
+    if (saved == true) _snack('Task saved ✨');
   }
 
   Future<void> _openEdit(Task task) async {
-    final changed = await context.push<bool>('/tasks/edit/${task.id}');
-    if (changed == true) await _load();
+    await context.push<bool>('/tasks/edit/${task.id}');
+    await _load(); // reload kahit cancel — baka nag-edit ng categories
   }
 
   void _toggleSearch() {
@@ -192,8 +237,10 @@ class _TasksScreenState extends State<TasksScreen> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final summary = TaskListLogic.weekSummary(_all, now);
-    final visible = TaskListLogic.applyFilter(_all, _filter, now, query: _search.text);
+    final visible = TaskListLogic.applyFilter(_all, _filter, now,
+        query: _search.text, categoryLabel: _categories.label);
     final groups = TaskListLogic.group(visible, _filter, now);
+    _now = now;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
@@ -244,6 +291,9 @@ class _TasksScreenState extends State<TasksScreen> {
     );
   }
 
+  /// Same "now" for every card in one build.
+  DateTime _now = DateTime.now();
+
   List<Widget> _buildGroup(TaskGroup g) => [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 30, 20, 14),
@@ -254,24 +304,33 @@ class _TasksScreenState extends State<TasksScreen> {
                 : TaskText.groupLabel,
           ),
         ),
-        for (final t in g.tasks)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-            child: Dismissible(
-              key: ValueKey('task-${t.id}'),
-              direction: DismissDirection.endToStart,
-              confirmDismiss: (_) => confirmDeleteTask(context, t.title),
-              onDismissed: (_) => _delete(t),
-              background: const _DeleteBackground(),
-              child: TaskCard(
-                task: t,
-                showDate: g.showDate,
-                onToggle: () => _toggle(t),
-                onTap: () => _openEdit(t),
-              ),
-            ),
-          ),
+        for (final t in g.tasks) _buildTask(t, g.showDate),
       ];
+
+  Widget _buildTask(Task t, bool showDate) {
+    final status = TaskStatus.of(t, _now);
+    final locked = status.isLocked;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+      child: Dismissible(
+        key: ValueKey('task-${t.id}'),
+        // History 🔒 → bawal i-swipe-delete.
+        direction: locked ? DismissDirection.none : DismissDirection.endToStart,
+        confirmDismiss: (_) => confirmDeleteTask(context, t.title),
+        onDismissed: (_) => _delete(t),
+        background: const _DeleteBackground(),
+        child: TaskCard(
+          task: t,
+          status: status,
+          categories: _categories,
+          language: _language,
+          showDate: showDate,
+          onToggle: () => _toggle(t),
+          onTap: () => _openEdit(t),
+        ),
+      ),
+    );
+  }
 }
 
 class _Header extends StatelessWidget {

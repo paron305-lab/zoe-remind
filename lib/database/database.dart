@@ -19,7 +19,8 @@ class ZoeDatabase {
   /// v4: reminders
   /// v5: tasks.category + tasks.updated_at, completion_history
   /// v6: reminder_occurrences (done / dismissed / missed bawat araw)
-  static const _version = 6;
+  /// v7: task_categories (sariling categories), tasks.missed_at, task_history
+  static const _version = 7;
 
   Future<Database>? _opening;
 
@@ -31,7 +32,10 @@ class ZoeDatabase {
     return openDatabase(
       path,
       version: _version,
-      onCreate: (db, version) => _createAllTables(db),
+      onCreate: (db, version) async {
+        await _createAllTables(db);
+        await _seedTaskCategories(db);
+      },
       onUpgrade: (db, oldVersion, newVersion) async {
         await _createAllTables(db);
         await _migrate(db, oldVersion);
@@ -50,6 +54,39 @@ class ZoeDatabase {
     if (oldVersion < 6) {
       await _backfillOccurrences(db);
     }
+    if (oldVersion < 7) {
+      await _addColumnIfMissing(db, StorageConstants.tasksTable, 'missed_at', 'TEXT');
+      await _seedTaskCategories(db);
+      // Ang mga lumang na-miss na task ay mare-record ng
+      // TaskRepository.recordMissed() pagbukas ng Tasks screen.
+    }
+  }
+
+  /// Ang 7 dating categories. Isang beses lang ito tinatawag
+  /// (bagong install o pag-upgrade sa v7), kaya kapag dinelete ng user
+  /// ang isa, hindi na ito babalik.
+  /// Pareho ang key sa dati, kaya walang task na kailangang baguhin.
+  static Future<void> _seedTaskCategories(Database db) async {
+    const seed = [
+      ('study', 'Study', 0xFF3FBE93),
+      ('thesis', 'Thesis', 0xFFF0768E),
+      ('work', 'Work', 0xFF4FADE0),
+      ('errand', 'Errand', 0xFF6E5BD6),
+      ('habit', 'Habit', 0xFFF0AA45),
+      ('personal', 'Personal', 0xFFC98BDB),
+      ('other', 'Other', 0xFF8A8999),
+    ];
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (var i = 0; i < seed.length; i++) {
+      final (key, label, color) = seed[i];
+      batch.rawInsert(
+        'INSERT OR IGNORE INTO ${StorageConstants.taskCategoriesTable} '
+        '(key, label, color, sort_order, created_at) VALUES (?, ?, ?, ?, ?)',
+        [key, label, color, i, now],
+      );
+    }
+    await batch.commit(noResult: true);
   }
 
   /// v6: ilipat sa reminder_occurrences ang mga dating record.
@@ -135,7 +172,8 @@ class ZoeDatabase {
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT,
         updated_at TEXT,
-        completed_at TEXT
+        completed_at TEXT,
+        missed_at TEXT
       )
     ''');
 
@@ -202,6 +240,41 @@ class ZoeDatabase {
     batch.execute(
       'CREATE INDEX IF NOT EXISTS idx_occurrences_day '
       'ON ${StorageConstants.reminderOccurrencesTable} (day)',
+    );
+
+    // Sariling categories ng user. key = naka-save sa tasks.category.
+    // color = ARGB int (hal. 0xFF3FBE93).
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.taskCategoriesTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        color INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    // History ng tasks na hindi nabubura kahit ma-delete ang task.
+    // Sa ngayon: 'missed' rows. (Done = nasa completion_history.)
+    // title/day/time = snapshot noong na-miss.
+    // Para sa Memory Engine: "Ano mga na-miss ko last week?"
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.taskHistoryTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        day TEXT NOT NULL,
+        time TEXT,
+        status TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        UNIQUE (task_id, day, status)
+      )
+    ''');
+
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_task_history_day '
+      'ON ${StorageConstants.taskHistoryTable} (day)',
     );
 
     await batch.commit(noResult: true);
