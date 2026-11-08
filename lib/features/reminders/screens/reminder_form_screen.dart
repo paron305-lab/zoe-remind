@@ -6,6 +6,7 @@ import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
+import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 import 'package:zoe_remind/features/reminders/widgets/delete_reminder_dialog.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_setup_screen.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
@@ -24,11 +25,16 @@ class ReminderFormResult {
 
 /// New Reminder / Edit Reminder.
 /// + button on Home → new.  Tapping a reminder on Home → edit.
+/// History 🔒 (done + lumipas na ang oras) → read-only, walang edit / delete.
 /// Pops a [ReminderFormResult] value when something changed, or null on back.
 class ReminderFormScreen extends StatefulWidget {
   /// null = create a new reminder
   final int? reminderId;
-  const ReminderFormScreen({super.key, this.reminderId});
+
+  /// true = binuksan mula sa naka-lock na item sa Home (?view=1).
+  final bool readOnly;
+
+  const ReminderFormScreen({super.key, this.reminderId, this.readOnly = false});
 
   @override
   State<ReminderFormScreen> createState() => _ReminderFormScreenState();
@@ -48,6 +54,9 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
 
   bool _loading = false;
   bool _saving = false;
+
+  /// History 🔒 → bawal baguhin. App code ang nagdedesisyon, hindi si Qwen.
+  bool _locked = false;
 
   bool get _isEdit => widget.reminderId != null;
 
@@ -81,6 +90,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
     }
     final day = ZoeDate.parseKey(r.date);
     setState(() {
+      _locked = widget.readOnly || ReminderStatusRules.isLockedForEdit(r);
       _original = r;
       _title.text = r.title;
       _date = day;
@@ -110,6 +120,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
   }
 
   void _applyQuickPick(_QuickPick pick) {
+    if (_locked) return;
     setState(() {
       _pick = pick;
       _date = switch (pick) {
@@ -130,6 +141,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
       );
 
   Future<void> _pickDate() async {
+    if (_locked) return;
     // When editing an older reminder, still allow its original day.
     final originalDay = _original == null ? null : ZoeDate.parseKey(_original!.date);
     final first =
@@ -151,6 +163,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
   }
 
   Future<void> _pickTime() async {
+    if (_locked) return;
     final next = DateTime.now().add(const Duration(hours: 1));
     final picked = await showTimePicker(
       context: context,
@@ -172,6 +185,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
       };
 
   Future<void> _pickRepeat() async {
+    if (_locked) return;
     final picked = await showModalBottomSheet<ReminderRepeat>(
       context: context,
       backgroundColor: Colors.white,
@@ -223,9 +237,16 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
   String get _cleanTitle => _title.text.trim();
 
   bool get _canSave =>
-      _hasWhen && !_isPast && _cleanTitle.isNotEmpty && !_saving && !_loading;
+      !_locked && _hasWhen && !_isPast && _cleanTitle.isNotEmpty && !_saving && !_loading;
 
   ZoeHintBanner _banner() {
+    if (_locked) {
+      return const ZoeHintBanner(
+        tone: BannerTone.ok,
+        text: 'Tapos na ito 🔒 — ',
+        boldText: 'kasama na sa history mo. Hindi na ito mababago.',
+      );
+    }
     if (!_hasWhen) {
       return const ZoeHintBanner(
         tone: BannerTone.ask,
@@ -259,7 +280,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
   // ---------- save / delete ----------
 
   Future<void> _save() async {
-    if (!_canSave) return;
+    if (!_canSave || _locked) return;
     setState(() => _saving = true);
     final now = DateTime.now().toIso8601String();
 
@@ -310,7 +331,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
   Future<void> _delete() async {
     final original = _original;
     final id = original?.id;
-    if (original == null || id == null) return;
+    if (original == null || id == null || _locked) return; // history 🔒
 
     final ok = await confirmDeleteReminder(
       context,
@@ -349,10 +370,14 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
                     ReminderBackButton(onTap: () => context.pop()),
                     const SizedBox(width: 22),
                     Expanded(
-                      child: Text(_isEdit ? 'Edit Reminder' : 'New Reminder',
+                      child: Text(
+                          _locked
+                              ? 'Reminder'
+                              : (_isEdit ? 'Edit Reminder' : 'New Reminder'),
                           style: ReminderText.screenTitle),
                     ),
-                    if (_isEdit && _original != null) _DeleteButton(onTap: _delete),
+                    if (_isEdit && _original != null && !_locked)
+                      _DeleteButton(onTap: _delete),
                   ],
                 ),
               ),
@@ -364,11 +389,13 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                child: GradientButton(
-                  label: _isEdit ? 'Save changes' : 'Create reminder',
-                  loading: _saving,
-                  onTap: _canSave ? _save : null,
-                ),
+                child: _locked
+                    ? GradientButton(label: 'Close', onTap: () => context.pop())
+                    : GradientButton(
+                        label: _isEdit ? 'Save changes' : 'Create reminder',
+                        loading: _saving,
+                        onTap: _canSave ? _save : null,
+                      ),
               ),
             ],
           ),
@@ -385,7 +412,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
         children: [
           _banner(),
           const FieldLabel('Title'),
-          _TitleField(controller: _title, maxLength: _maxTitle),
+          _TitleField(controller: _title, maxLength: _maxTitle, readOnly: _locked),
           const FieldLabel('When'),
           Row(
             children: [
@@ -447,7 +474,12 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
 class _TitleField extends StatelessWidget {
   final TextEditingController controller;
   final int maxLength;
-  const _TitleField({required this.controller, required this.maxLength});
+  final bool readOnly;
+  const _TitleField({
+    required this.controller,
+    required this.maxLength,
+    this.readOnly = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -458,6 +490,7 @@ class _TitleField extends StatelessWidget {
 
     return TextField(
       controller: controller,
+      readOnly: readOnly, // history 🔒
       maxLength: maxLength,
       textCapitalization: TextCapitalization.sentences,
       textInputAction: TextInputAction.done,

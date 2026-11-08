@@ -172,6 +172,25 @@ class ReminderAlarmService {
     }
   }
 
+  /// Mga alarm na aktibo pa: reminder id → oras ng occurrence na tinutunog nito
+  /// (galing sa payload). Hal. naka-snooze ang 7:00 PM → {id: 7:00 PM}.
+  /// Para hindi agad lumabas na "Missed" ang naka-snooze o nagri-ring.
+  Future<Map<int, DateTime>> activeAlarmOccurrences() async {
+    try {
+      final result = <int, DateTime>{};
+      final now = DateTime.now();
+      for (final a in await Alarm.getAlarms()) {
+        if (a.dateTime.isAfter(now) || await Alarm.isRinging(a.id)) {
+          result[a.id] = readPayload(a).originalTime;
+        }
+      }
+      return result;
+    } catch (e) {
+      lastError = 'Active alarms failed: $e';
+      return {};
+    }
+  }
+
   /// Pagkatapos mag-delete.
   Future<void> cancel(int id) async {
     try {
@@ -235,14 +254,16 @@ class ReminderAlarmService {
         'title': title,
         'originalTime': dateTime.toIso8601String(),
       }),
+      // Walang `volume:` → hindi gagalawin ang volume ng phone, kaya
+      // hindi lalabas ang volume slider. Fade-in pa rin ng music (3s).
       volumeSettings: VolumeSettings.fade(
-        volume: 0.8,
         fadeDuration: const Duration(seconds: 3),
       ),
       notificationSettings: NotificationSettings(
         title: 'Zoe Reminder',
         body: title,
         androidStopAlarmOnDismiss: false, // bawal patayin sa swipe ng notif
+        icon: 'notification_icon', // Zoe logo (res/drawable-*/notification_icon.png)
         iconColor: notifColor, // lavender-blue
       ),
     );
@@ -277,14 +298,17 @@ class ReminderAlarmService {
     await finish();
   }
 
-  /// DISMISS: titigil, hindi done (pending pa rin).
+  /// DISMISS: titigil, hindi done (walang history log).
+  /// Lalabas na "Dismissed" sa Home; pwede pang i-mark as done nang late.
   /// One-time -> wala nang alarm. Repeating -> tutunog sa susunod na araw.
   Future<void> dismiss(AlarmSettings alarm) async {
     await Alarm.stop(alarm.id);
     try {
+      final day = readPayload(alarm).originalTime;
+      if (alarm.id != testAlarmId) await _repo.setDismissedOn(alarm.id, day);
       final r = await _repo.getById(alarm.id);
       if (r != null) {
-        await _scheduleNext(r, from: readPayload(alarm).originalTime);
+        await _scheduleNext(r, from: day);
       }
     } catch (e) {
       lastError = 'Dismiss failed: $e';

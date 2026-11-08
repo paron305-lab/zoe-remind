@@ -13,14 +13,15 @@ class Reminder {
   final String time;
   final ReminderRepeat repeat;
 
-  /// 'pending' or 'done' (for one-time reminders)
+  /// 'pending', 'done' o 'dismissed'.
+  /// 'dismissed' = pinindot ang Dismiss sa ringing screen para sa [lastDoneDate].
   final String status;
 
-  /// Day this reminder was last ticked off, 'yyyy-MM-dd'.
-  /// Lets repeating reminders be "done for today" and fresh again tomorrow.
+  /// Huling araw na na-done o na-dismiss ang reminder, 'yyyy-MM-dd'.
+  /// Para ang repeating reminders ay "done for today" at fresh ulit bukas.
   final String? lastDoneDate;
 
-  /// 'not_scheduled' for now — the notification step will update this.
+  /// 'scheduled' / 'not_scheduled' — ina-update ng ReminderAlarmService.
   final String notificationState;
   final String createdAt;
   final String updatedAt;
@@ -111,5 +112,11 @@ class Reminder {
     };
   }
 
-  bool isDoneOn(DateTime day) => lastDoneDate == ZoeDate.key(day);
+  /// Na-done ba ang reminder sa [day]?
+  bool isDoneOn(DateTime day) =>
+      lastDoneDate == ZoeDate.key(day) && status != 'dismissed';
+
+  /// Pinindot ba ang Dismiss sa [day]?
+  bool isDismissedOn(DateTime day) =>
+      lastDoneDate == ZoeDate.key(day) && status == 'dismissed';
 }

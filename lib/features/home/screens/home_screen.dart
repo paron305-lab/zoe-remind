@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
@@ -12,6 +15,7 @@ import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/home/widgets/reminder_board.dart';
 import 'package:zoe_remind/features/home/widgets/timeline_stats.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_fab.dart';
+import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_form_screen.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/widgets/delete_reminder_dialog.dart';
@@ -31,6 +35,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List<HomeItem> _upcoming = const [];
   bool _loading = true;
   bool _remindersOn = true;
+  ZoeLanguage _language = ZoeLanguage.both;
+
+  /// Bawat minuto: i-refresh para maging "Missed" / "Done ✓" ang lumipas na.
+  Timer? _tick;
 
   @override
   void initState() {
@@ -40,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Done / Snooze / Dismiss sa ringing screen -> i-refresh ang Home
     ReminderAlarmService.instance.changes.addListener(_loadItems);
     _loadRemindersOn();
+    _tick = Timer.periodic(const Duration(minutes: 1), (_) => _loadItems());
   }
 
   // ---------- bell: reminders ON / OFF ----------
@@ -63,36 +72,69 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _tick?.cancel();
     ReminderAlarmService.instance.changes.removeListener(_loadItems);
     super.dispose();
   }
 
   Future<void> _loadName() async {
-    final name = await SettingsRepository().getUserName();
+    final settings = SettingsRepository();
+    final name = await settings.getUserName();
+    final language = await settings.getLanguage();
     if (!mounted) return;
-    setState(() => _userName = (name == null || name.isEmpty) ? 'there' : name);
+    setState(() {
+      _userName = (name == null || name.isEmpty) ? 'there' : name;
+      _language = language;
+    });
   }
 
-  HomeItem _toItem(Reminder r, DateTime day, {bool showDate = false}) => HomeItem(
-        id: '${r.id}',
-        title: r.title,
-        time: ZoeDate.parseTime(r.time),
-        type: HomeItemType.reminder,
-        done: r.isDoneOn(day),
-        dateLabel: showDate ? ZoeDate.relative(day) : null,
-        repeats: r.repeat != ReminderRepeat.none,
-      );
+  HomeItem _toItem(
+    Reminder r,
+    DateTime day, {
+    bool showDate = false,
+    required DateTime now,
+    Map<int, DateTime> activeAlarms = const {},
+  }) {
+    // May alarm pa para sa occurrence na ito (naka-snooze / nagri-ring)?
+    final at = ReminderStatusRules.occurrenceTime(r, day);
+    final pendingAt = activeAlarms[r.id];
+    final alarmPending = pendingAt != null &&
+        pendingAt.year == at.year &&
+        pendingAt.month == at.month &&
+        pendingAt.day == at.day &&
+        pendingAt.hour == at.hour &&
+        pendingAt.minute == at.minute;
+
+    final status =
+        ReminderStatusRules.statusOn(r, day, now: now, alarmPending: alarmPending);
+    return HomeItem(
+      id: '${r.id}',
+      title: r.title,
+      time: ZoeDate.parseTime(r.time),
+      type: HomeItemType.reminder,
+      done: status.isDone,
+      dateLabel: showDate ? ZoeDate.relative(day) : null,
+      repeats: r.repeat != ReminderRepeat.none,
+      day: day,
+      status: status,
+    );
+  }
 
   Future<void> _loadItems() async {
     try {
-      final today = ZoeDate.dayOnly(DateTime.now());
+      final now = DateTime.now();
+      final today = ZoeDate.dayOnly(now);
       final todayList = await _reminders.getForDay(today);
       final upcoming = await _reminders.getUpcoming(days: 30);
+      final active = await ReminderAlarmService.instance.activeAlarmOccurrences();
       if (!mounted) return;
       setState(() {
-        _today = [for (final r in todayList) _toItem(r, today)];
+        _today = [
+          for (final r in todayList) _toItem(r, today, now: now, activeAlarms: active),
+        ];
         _upcoming = [
-          for (final (day, r) in upcoming) _toItem(r, day, showDate: true),
+          for (final (day, r) in upcoming)
+            _toItem(r, day, showDate: true, now: now, activeAlarms: active),
         ];
         _loading = false;
       });
@@ -102,17 +144,72 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Checkbox — gumagana lang kapag HINDI PA oras (check nang maaga / uncheck).
   Future<void> _toggle(HomeItem item) async {
     final id = int.tryParse(item.id);
-    if (id == null) return;
+    if (id == null || item.locked || !item.status.showsCheckbox) return;
+    final done = !item.done;
     // update the UI right away, then save
     setState(() {
       _today = [
-        for (final i in _today) i.id == item.id ? i.copyWith(done: !i.done) : i,
+        for (final i in _today)
+          i.id == item.id
+              ? i.copyWith(
+                  done: done,
+                  status: done ? ReminderStatus.doneEarly : ReminderStatus.upcoming)
+              : i,
       ];
     });
-    await _reminders.setDoneOn(id, DateTime.now(), !item.done);
+    await _reminders.setDoneOn(id, item.day ?? DateTime.now(), done);
     await ReminderAlarmService.instance.syncById(id); // cancel o next day
+    await _loadItems();
+  }
+
+  /// Pinindot ang "Missed" / "Dismissed" → tanungin kung tapos na (late).
+  Future<void> _markLate(HomeItem item) async {
+    final id = int.tryParse(item.id);
+    if (id == null || !item.status.canMarkLate) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        title: const Text(
+          'Tapos mo na ba ito?',
+          style: TextStyle(
+              fontFamily: 'Poppins', fontWeight: FontWeight.w700, color: HomeColors.ink),
+        ),
+        content: Text(
+          '"${item.title}" — ${item.status.label(_language)} kanina. '
+          'Kapag minark mo as done, mapupunta na ito sa history mo 🔒.',
+          style: const TextStyle(
+              fontFamily: 'Poppins', fontSize: 15, color: HomeColors.inkSoft, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Hindi pa',
+                style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontWeight: FontWeight.w700,
+                    color: HomeColors.inkSoft)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Mark as done',
+                style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontWeight: FontWeight.w700,
+                    color: HomeColors.mint)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _reminders.setDoneOn(id, item.day ?? DateTime.now(), true);
+    await ReminderAlarmService.instance.syncById(id);
+    await _loadItems();
+    if (mounted) ZoeSnack.show(context, 'Nice! Nasa history na ✓');
   }
 
   // ---------- delete (swipe left) ----------
@@ -122,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _delete(HomeItem item) async {
     final id = int.tryParse(item.id);
-    if (id == null) return;
+    if (id == null || item.locked) return; // history 🔒 → bawal i-delete
     // remove right away (a repeating one can be in both lists)
     setState(() {
       _today = _today.where((i) => i.id != item.id).toList();
@@ -149,7 +246,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openEdit(HomeItem item) async {
-    final result = await context.push<String>('/reminders/edit/${item.id}');
+    // History 🔒 → read-only view
+    final path = item.locked
+        ? '/reminders/edit/${item.id}?view=1'
+        : '/reminders/edit/${item.id}';
+    final result = await context.push<String>(path);
     if (result == null) return;
     await _loadItems();
     if (!mounted) return;
@@ -204,10 +305,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       else
                         ReminderBoard(
                           items: _today,
+                          language: _language,
                           onToggle: _toggle,
                           onTap: _openEdit,
                           confirmDelete: _confirmDelete,
                           onDelete: _delete,
+                          onStatusTap: _markLate,
                         ),
                       const SizedBox(height: 20),
                       TimelineStats(tasksLeft: left, reminders: reminders, streak: 7),
@@ -218,6 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         ReminderBoard(
                           items: _upcoming,
+                          language: _language,
                           onTap: _openEdit,
                           confirmDelete: _confirmDelete,
                           onDelete: _delete,

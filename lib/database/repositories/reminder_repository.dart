@@ -106,6 +106,23 @@ class ReminderRepository {
     });
   }
 
+  /// Dismiss sa ringing screen: hindi done (walang history log),
+  /// pero tanda na sinadya itong laktawan sa [day].
+  Future<void> setDismissedOn(int id, DateTime day) async {
+    final db = await ZoeDatabase.instance.database;
+    await db.update(
+      _table,
+      {
+        'last_done_date': ZoeDate.key(day),
+        'status': 'dismissed',
+        'completed_at': null,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// 'scheduled' / 'not_scheduled' — updated by ReminderAlarmService.
   Future<void> setNotificationState(int id, String state) async {
     final db = await ZoeDatabase.instance.database;

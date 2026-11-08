@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Huwag burahin ng release build (resource shrinking) ang notification icon.
+     Pangalan lang ('notification_icon') ang gamit ng alarm package, kaya
+     hindi ito nakikita ng shrinker. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/notification_icon" />

@@ -56,8 +56,11 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/reminders/edit/:id',
-      builder: (context, state) =>
-          ReminderFormScreen(reminderId: int.tryParse(state.pathParameters['id'] ?? '')),
+      // ?view=1 → read-only (history 🔒)
+      builder: (context, state) => ReminderFormScreen(
+        reminderId: int.tryParse(state.pathParameters['id'] ?? ''),
+        readOnly: state.uri.queryParameters['view'] == '1',
+      ),
     ),
 
     // Ringing reminder — full screen, no bottom nav.

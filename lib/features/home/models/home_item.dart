@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
+import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 
 enum HomeItemType { task, habit, reminder }
 
@@ -32,6 +33,12 @@ class HomeItem {
   /// Repeating reminder (daily / weekly / monthly) — delete removes every repeat.
   final bool repeats;
 
+  /// Araw ng occurrence na ito (para sa late "Mark as done").
+  final DateTime? day;
+
+  /// Upcoming / Done early / History 🔒 / Dismissed / Missed.
+  final ReminderStatus status;
+
   const HomeItem({
     required this.id,
     required this.title,
@@ -40,9 +47,14 @@ class HomeItem {
     this.done = false,
     this.dateLabel,
     this.repeats = false,
+    this.day,
+    this.status = ReminderStatus.upcoming,
   });
 
-  HomeItem copyWith({bool? done}) => HomeItem(
+  /// History na → bawal uncheck / edit / delete.
+  bool get locked => status.isLocked;
+
+  HomeItem copyWith({bool? done, ReminderStatus? status}) => HomeItem(
         id: id,
         title: title,
         time: time,
@@ -50,6 +62,8 @@ class HomeItem {
         done: done ?? this.done,
         dateLabel: dateLabel,
         repeats: repeats,
+        day: day,
+        status: status ?? this.status,
       );
 
   String get timeLabel =>

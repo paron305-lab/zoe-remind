@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/features/home/models/home_item.dart';
+import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
+import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 
 class ReminderBoard extends StatefulWidget {
   final List<HomeItem> items;
@@ -12,9 +14,15 @@ class ReminderBoard extends StatefulWidget {
   final ValueChanged<HomeItem>? onTap;
 
   /// Swipe a row left → ask first ([confirmDelete]), then [onDelete].
-  /// Both null = no swipe-to-delete.
+  /// Both null = no swipe-to-delete. Hindi gumagana sa naka-lock (history).
   final Future<bool> Function(HomeItem)? confirmDelete;
   final ValueChanged<HomeItem>? onDelete;
+
+  /// Pinindot ang "Missed" / "Dismissed" label → i-mark as done nang late.
+  final ValueChanged<HomeItem>? onStatusTap;
+
+  /// Para sa text ng status label (English / Tagalog / Both).
+  final ZoeLanguage language;
 
   final String emptyText;
 
@@ -29,6 +37,8 @@ class ReminderBoard extends StatefulWidget {
     this.onTap,
     this.confirmDelete,
     this.onDelete,
+    this.onStatusTap,
+    this.language = ZoeLanguage.both,
     this.emptyText = 'Nothing scheduled yet. Tap + to add one.',
     this.maxVisibleRows = 3.5,
   });
@@ -48,10 +58,17 @@ class _ReminderBoardState extends State<ReminderBoard> {
   }
 
   Widget _buildRow(HomeItem item) {
-    final row = _BoardRow(item: item, onToggle: widget.onToggle, onTap: widget.onTap);
+    final row = _BoardRow(
+      item: item,
+      onToggle: widget.onToggle,
+      onTap: widget.onTap,
+      onStatusTap: widget.onStatusTap,
+      language: widget.language,
+    );
     final confirm = widget.confirmDelete;
     final onDelete = widget.onDelete;
-    if (confirm == null || onDelete == null) return row;
+    // History 🔒 → walang swipe-to-delete
+    if (confirm == null || onDelete == null || item.locked) return row;
 
     return Dismissible(
       // same reminder can show on several days in "Coming up" → add the day
@@ -124,7 +141,15 @@ class _BoardRow extends StatelessWidget {
   final HomeItem item;
   final ValueChanged<HomeItem>? onToggle;
   final ValueChanged<HomeItem>? onTap;
-  const _BoardRow({required this.item, required this.onToggle, this.onTap});
+  final ValueChanged<HomeItem>? onStatusTap;
+  final ZoeLanguage language;
+  const _BoardRow({
+    required this.item,
+    required this.onToggle,
+    this.onTap,
+    this.onStatusTap,
+    required this.language,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -185,9 +210,68 @@ class _BoardRow extends StatelessWidget {
               ],
             ),
           ),
-          if (onToggle != null)
-            ZoeCheckbox(checked: item.done, onTap: () => onToggle!(item)),
+          _rightSide(),
         ],
+      ),
+    );
+  }
+
+  /// Right side ng card:
+  /// - hindi pa oras → checkbox
+  /// - history → "Done ✓" 🔒 (green)
+  /// - dismissed → "Dismissed" (amber), pwedeng pindutin
+  /// - missed → "Missed" (coral), pwedeng pindutin
+  Widget _rightSide() {
+    final status = item.status;
+    if (status.showsCheckbox) {
+      if (onToggle == null) return const SizedBox.shrink();
+      return ZoeCheckbox(checked: item.done, onTap: () => onToggle!(item));
+    }
+    return StatusChip(
+      status: status,
+      language: language,
+      onTap: status.canMarkLate && onStatusTap != null ? () => onStatusTap!(item) : null,
+    );
+  }
+}
+
+/// "Done ✓ 🔒" / "Dismissed" / "Missed" sa right side ng card.
+class StatusChip extends StatelessWidget {
+  final ReminderStatus status;
+  final ZoeLanguage language;
+  final VoidCallback? onTap;
+  const StatusChip({super.key, required this.status, required this.language, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: status.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: status.color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (status.isLocked) ...[
+            Icon(Icons.lock_rounded, size: 13, color: status.color),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            status.label(language),
+            style: HomeText.tag.copyWith(color: status.color, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+    return Semantics(
+      button: onTap != null,
+      label: status.label(language),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(padding: const EdgeInsets.only(left: 6), child: chip),
       ),
     );
   }
