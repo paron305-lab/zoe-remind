@@ -5,6 +5,7 @@ import 'package:zoe_remind/core/widgets/zoe_bottom_nav.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/chat/screens/zoe_chat_screen.dart';
 import 'package:zoe_remind/features/home/screens/home_screen.dart';
+import 'package:zoe_remind/features/notes/screens/note_editor_screen.dart';
 import 'package:zoe_remind/features/notes/screens/notes_screen.dart';
 import 'package:zoe_remind/features/onboarding/screens/onboarding_screen.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_form_screen.dart';
@@ -84,6 +85,19 @@ final appRouter = GoRouter(
       path: '/tasks/edit/:id',
       builder: (context, state) =>
           TaskFormScreen(taskId: int.tryParse(state.pathParameters['id'] ?? '')),
+    ),
+
+    // New / Edit Note — full screen, no bottom nav.
+    // From the Notes + button: context.push('/notes/new')
+    // Tapping a note:          context.push('/notes/edit/<id>')
+    GoRoute(
+      path: '/notes/new',
+      builder: (context, state) => const NoteEditorScreen(),
+    ),
+    GoRoute(
+      path: '/notes/edit/:id',
+      builder: (context, state) =>
+          NoteEditorScreen(noteId: int.tryParse(state.pathParameters['id'] ?? '')),
     ),
 
     StatefulShellRoute.indexedStack(

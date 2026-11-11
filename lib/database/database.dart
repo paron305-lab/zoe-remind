@@ -20,7 +20,8 @@ class ZoeDatabase {
   /// v5: tasks.category + tasks.updated_at, completion_history
   /// v6: reminder_occurrences (done / dismissed / missed bawat araw)
   /// v7: task_categories (sariling categories), tasks.missed_at, task_history
-  static const _version = 7;
+  /// v8: notes (Notes tab — typed + galing kay Zoe, pinned)
+  static const _version = 8;
 
   Future<Database>? _opening;
 
@@ -275,6 +276,27 @@ class ZoeDatabase {
     batch.execute(
       'CREATE INDEX IF NOT EXISTS idx_task_history_day '
       'ON ${StorageConstants.taskHistoryTable} (day)',
+    );
+
+    // Notes tab. source = 'typed' (Notes UI) o 'zoe' (sine-save ni Zoe sa chat).
+    // pinned = 0/1. Walang FK sa iba — free text, searchable ng Memory Engine.
+    // Bagong table lang (walang column change), kaya sapat na ang
+    // IF NOT EXISTS para sa v7 → v8.
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.notesTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'typed',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_notes_updated_at '
+      'ON ${StorageConstants.notesTable} (updated_at)',
     );
 
     await batch.commit(noResult: true);

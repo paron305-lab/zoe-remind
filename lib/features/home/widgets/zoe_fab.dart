@@ -5,7 +5,7 @@ class ZoeFab extends StatelessWidget {
   final VoidCallback onTap;
   final double size;
 
-  const ZoeFab({super.key, required this.onTap, this.size = 45});
+  const ZoeFab({super.key, required this.onTap, this.size = 52});
 
   @override
   Widget build(BuildContext context) {
