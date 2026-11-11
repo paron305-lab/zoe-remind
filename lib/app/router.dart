@@ -10,6 +10,10 @@ import 'package:zoe_remind/features/notes/screens/notes_screen.dart';
 import 'package:zoe_remind/features/onboarding/screens/onboarding_screen.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_form_screen.dart';
 import 'package:zoe_remind/features/reminders/screens/reminder_ringing_screen.dart';
+import 'package:zoe_remind/features/reminders/screens/reminder_setup_screen.dart';
+import 'package:zoe_remind/features/settings/screens/chat_history_screen.dart';
+import 'package:zoe_remind/features/settings/screens/developer_screen.dart';
+import 'package:zoe_remind/features/settings/screens/memories_screen.dart';
 import 'package:zoe_remind/features/settings/screens/settings_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/task_form_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/tasks_screen.dart';
@@ -98,6 +102,30 @@ final appRouter = GoRouter(
       path: '/notes/edit/:id',
       builder: (context, state) =>
           NoteEditorScreen(noteId: int.tryParse(state.pathParameters['id'] ?? '')),
+    ),
+
+    // Settings sub-screens — full screen, no bottom nav.
+    GoRoute(
+      path: '/reminders/setup',
+      builder: (context, state) => const ReminderSetupScreen(),
+    ),
+    GoRoute(
+      path: '/settings/chat-history',
+      builder: (context, state) => const ChatHistoryScreen(),
+    ),
+    GoRoute(
+      path: '/settings/chat-history/:id',
+      builder: (context, state) => ChatConversationScreen(
+        conversationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+      ),
+    ),
+    GoRoute(
+      path: '/settings/memories',
+      builder: (context, state) => const MemoriesScreen(),
+    ),
+    GoRoute(
+      path: '/settings/developer',
+      builder: (context, state) => const DeveloperScreen(),
     ),
 
     StatefulShellRoute.indexedStack(

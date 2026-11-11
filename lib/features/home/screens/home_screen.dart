@@ -47,6 +47,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadItems();
     // Done / Snooze / Dismiss sa ringing screen -> i-refresh ang Home
     ReminderAlarmService.instance.changes.addListener(_loadItems);
+    // Bell sa Home at master switch sa Settings → iisang value.
+    ReminderAlarmService.instance.enabled.addListener(_onEnabledChanged);
+    // Pinalitan ang pangalan / language sa Settings → i-refresh.
+    SettingsRepository.changes.addListener(_loadName);
     _loadRemindersOn();
     _tick = Timer.periodic(const Duration(minutes: 1), (_) => _loadItems());
   }
@@ -56,6 +60,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadRemindersOn() async {
     final on = await ReminderAlarmService.instance.loadEnabled();
     if (mounted) setState(() => _remindersOn = on);
+  }
+
+  void _onEnabledChanged() {
+    final on = ReminderAlarmService.instance.enabled.value;
+    if (mounted && on != _remindersOn) setState(() => _remindersOn = on);
   }
 
   Future<void> _toggleReminders() async {
@@ -74,6 +83,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _tick?.cancel();
     ReminderAlarmService.instance.changes.removeListener(_loadItems);
+    ReminderAlarmService.instance.enabled.removeListener(_onEnabledChanged);
+    SettingsRepository.changes.removeListener(_loadName);
     super.dispose();
   }
 

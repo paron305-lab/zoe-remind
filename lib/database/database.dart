@@ -21,7 +21,9 @@ class ZoeDatabase {
   /// v6: reminder_occurrences (done / dismissed / missed bawat araw)
   /// v7: task_categories (sariling categories), tasks.missed_at, task_history
   /// v8: notes (Notes tab — typed + galing kay Zoe, pinned)
-  static const _version = 8;
+  /// v9: model_state.size_bytes / file_path / verified_at,
+  ///     ai_conversations + ai_messages (Zoe Chat history), memories
+  static const _version = 9;
 
   Future<Database>? _opening;
 
@@ -60,6 +62,12 @@ class ZoeDatabase {
       await _seedTaskCategories(db);
       // Ang mga lumang na-miss na task ay mare-record ng
       // TaskRepository.recordMissed() pagbukas ng Tasks screen.
+    }
+    if (oldVersion < 9) {
+      // Para sa Settings › Zoe's Brain (at sa model downloader later).
+      await _addColumnIfMissing(db, 'model_state', 'size_bytes', 'INTEGER');
+      await _addColumnIfMissing(db, 'model_state', 'file_path', 'TEXT');
+      await _addColumnIfMissing(db, 'model_state', 'verified_at', 'TEXT');
     }
   }
 
@@ -143,6 +151,9 @@ class ZoeDatabase {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         status TEXT NOT NULL,
         model_version TEXT,
+        size_bytes INTEGER,
+        file_path TEXT,
+        verified_at TEXT,
         updated_at TEXT NOT NULL
       )
     ''');
@@ -298,6 +309,46 @@ class ZoeDatabase {
       'CREATE INDEX IF NOT EXISTS idx_notes_updated_at '
       'ON ${StorageConstants.notesTable} (updated_at)',
     );
+
+    // Zoe Chat history. Isang conversation = isang chat session.
+    // role = 'user' / 'zoe'. Nabubura sa Settings › Privacy & Memory.
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.conversationsTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.messagesTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_messages_conversation '
+      'ON ${StorageConstants.messagesTable} (conversation_id, created_at)',
+    );
+
+    // Long-term memory ni Zoe (hal. "Mas gusto ko ng morning reminders").
+    // source = 'chat' (natutunan sa usapan) o 'user' (sinabi mismo).
+    // importance 1–5. Hindi nagsasave dito kapag OFF ang long-term memory.
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.memoriesTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'chat',
+        importance INTEGER NOT NULL DEFAULT 3,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
 
     await batch.commit(noResult: true);
   }

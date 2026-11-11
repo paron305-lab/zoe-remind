@@ -1,11 +1,27 @@
-import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
-import 'package:zoe_remind/features/reminders/screens/reminder_setup_screen.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:zoe_remind/app/app_config.dart';
+import 'package:zoe_remind/core/constants/zoe_language.dart';
+import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
+import 'package:zoe_remind/database/models/model_info.dart';
+import 'package:zoe_remind/database/repositories/chat_history_repository.dart';
+import 'package:zoe_remind/database/repositories/memory_repository.dart';
+import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/onboarding/widgets/profile_page.dart' show showPolicySheet;
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
+import 'package:zoe_remind/features/settings/widgets/brain_card.dart';
+import 'package:zoe_remind/features/settings/widgets/profile_card.dart';
+import 'package:zoe_remind/features/settings/widgets/settings_dialogs.dart';
+import 'package:zoe_remind/features/settings/widgets/settings_styles.dart';
+import 'package:zoe_remind/features/settings/widgets/settings_tiles.dart';
 
-/// TEMPORARY: "Alarm Check" screen para ma-debug ang reminders sa phone
-/// (walang logs ang release APK). Papalitan ng totoong Settings mamaya.
+/// Settings tab (Screen 09).
+/// Profile · Zoe Chat · Zoe's Brain · Reminders · Privacy & Memory ·
+/// Appearance · About · Developer (hidden — 7 taps sa app version).
+/// Lahat ng value ay galing / sine-save sa zoe.db (settings, user_profile,
+/// model_state, ai_messages, memories).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -14,186 +30,571 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
-  static const _lavender = Color(0xFF8B7FE0);
-  static const _mint = Color(0xFF3FBE93);
-  static const _coral = Color(0xFFF0768E);
-  static const _ink = Color(0xFF2B2A3D);
-  static const _cream = Color(0xFFFBF6EF);
+  final _settings = SettingsRepository();
+  final _chats = ChatHistoryRepository();
+  final _memories = MemoryRepository();
+  final _alarms = ReminderAlarmService.instance;
 
+  bool _loading = true;
+  bool _busy = false;
+
+  UserProfile? _profile;
+  ZoeLanguage _language = ZoeLanguage.both;
+  ModelInfo _model = ModelInfo.none;
   SetupStatus? _setup;
-  List<AlarmSettings> _alarms = const [];
-  String _result = '';
-  bool _testing = false;
+  int _chatCount = 0;
+  int _memoryCount = 0;
+  bool _longTermMemory = true;
+  bool _darkMode = false;
+  bool _developer = false;
+
+  /// 7 taps sa app version → lalabas ang Developer.
+  int _versionTaps = 0;
+  static const _tapsToUnlock = 7;
+
+  SettingsPalette get _p => SettingsPalette(_darkMode);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _refresh();
+    ChatHistoryRepository.changes.addListener(_loadCounts);
+    MemoryRepository.changes.addListener(_loadCounts);
+    // Bell sa Home → sabay ang switch dito.
+    _alarms.enabled.addListener(_rebuild);
+    _alarms.sound.addListener(_rebuild);
+    _alarms.vibrate.addListener(_rebuild);
+    _alarms.defaultSnooze.addListener(_rebuild);
+    _load();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ChatHistoryRepository.changes.removeListener(_loadCounts);
+    MemoryRepository.changes.removeListener(_loadCounts);
+    _alarms.enabled.removeListener(_rebuild);
+    _alarms.sound.removeListener(_rebuild);
+    _alarms.vibrate.removeListener(_rebuild);
+    _alarms.defaultSnooze.removeListener(_rebuild);
     super.dispose();
   }
 
-  // Pagbalik galing sa phone Settings → i-refresh ang status.
+  // Pagbalik galing sa phone Settings → i-check ulit ang permissions.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refresh();
+    if (state == AppLifecycleState.resumed) _loadSetup();
   }
 
-  Future<void> _refresh() async {
-    final setup = await ReminderPermissions.instance.check();
-    var alarms = <AlarmSettings>[];
-    var result = _result;
+  void _rebuild() {
+    if (mounted) setState(() {});
+  }
+
+  // ───────────────────────── data ─────────────────────────
+
+  Future<void> _load() async {
     try {
-      alarms = await Alarm.getAlarms();
-      alarms.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+      await _alarms.loadPrefs();
+      await _alarms.loadEnabled();
+      final results = await Future.wait([
+        _settings.getProfile(),
+        _settings.getLanguage(),
+        _settings.getModelInfo(),
+        _settings.isLongTermMemoryOn(),
+        _settings.isDarkMode(),
+        _settings.isDeveloperUnlocked(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _profile = results[0] as UserProfile?;
+        _language = results[1] as ZoeLanguage;
+        _model = results[2] as ModelInfo;
+        _longTermMemory = results[3] as bool;
+        _darkMode = results[4] as bool;
+        _developer = results[5] as bool;
+        _loading = false;
+      });
     } catch (e) {
-      result = '❌ getAlarms error: $e';
+      debugPrint('Loading settings failed: $e');
+      if (mounted) setState(() => _loading = false);
     }
+    await Future.wait([_loadCounts(), _loadSetup()]);
+  }
+
+  Future<void> _loadCounts() async {
+    try {
+      final chats = await _chats.messageCount();
+      final memories = await _memories.count();
+      if (!mounted) return;
+      setState(() {
+        _chatCount = chats;
+        _memoryCount = memories;
+      });
+    } catch (e) {
+      debugPrint('Loading chat/memory counts failed: $e');
+    }
+  }
+
+  Future<void> _loadSetup() async {
+    try {
+      final s = await ReminderPermissions.instance.check();
+      if (mounted) setState(() => _setup = s);
+    } catch (e) {
+      debugPrint('Checking reminder setup failed: $e');
+    }
+  }
+
+  Future<void> _loadModel() async {
+    final m = await _settings.getModelInfo();
+    if (mounted) setState(() => _model = m);
+  }
+
+  /// Patakbuhin ang [action]; kapag pumalya, error snackbar.
+  Future<void> _save(Future<void> Function() action, {String? ok}) async {
+    try {
+      await action();
+      if (ok != null && mounted) ZoeSnack.show(context, ok);
+    } catch (e) {
+      debugPrint('Saving setting failed: $e');
+      if (mounted) ZoeSnack.show(context, "Couldn't save that setting.", error: true);
+      _load();
+    }
+  }
+
+  // ───────────────────────── Profile ─────────────────────────
+
+  Future<void> _editName() async {
+    final name = await showEditNameDialog(context, _profile?.name ?? '', _p);
+    if (name == null || name == _profile?.name || !mounted) return;
+    await _save(() async {
+      await _settings.setUserName(name);
+      final profile = await _settings.getProfile();
+      if (mounted) setState(() => _profile = profile);
+    }, ok: 'Hi, $name! ✨');
+  }
+
+  // ───────────────────────── Zoe Chat ─────────────────────────
+
+  Future<void> _setLanguage(ZoeLanguage lang) async {
+    setState(() => _language = lang);
+    await _save(() => _settings.setLanguage(lang), ok: lang.description);
+  }
+
+  // ───────────────────────── Zoe's Brain ─────────────────────────
+
+  Future<void> _downloadModel() async {
+    setState(() => _busy = true);
+    await _save(() => _settings.setModelStatus(ModelStatus.pending),
+        ok: "Okay! Zoe will get her brain ready 🧠");
+    await _loadModel();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _cancelDownload() async {
+    setState(() => _busy = true);
+    await _save(() => _settings.setModelStatus(ModelStatus.skipped), ok: 'Download cancelled');
+    await _loadModel();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  void _updateModel() {
+    // Wala pang manifest.json (Supabase) na ikukumpara — up to date ang naka-install.
+    ZoeSnack.show(context, "Zoe's brain is up to date (v${_model.version ?? '—'})");
+  }
+
+  Future<void> _deleteModel() async {
+    final ok = await confirmAction(
+      context,
+      palette: _p,
+      title: "Delete Zoe's brain?",
+      message: 'Matatanggal ang AI model sa phone mo. Hindi muna makakapag-chat si Zoe '
+          'hanggang i-download mo ulit. Hindi mabubura ang tasks, reminders at notes mo.',
+      confirmLabel: 'Delete',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    var freed = 0;
+    await _save(() async {
+      freed = await _settings.deleteModel();
+    });
+    await _loadModel();
     if (!mounted) return;
-    setState(() {
-      _setup = setup;
-      _alarms = alarms;
-      _result = result;
-    });
+    setState(() => _busy = false);
+    ZoeSnack.show(context,
+        freed > 0 ? 'Deleted — ${BrainCard.formatBytes(freed)} freed' : "Zoe's brain removed");
   }
 
-  Future<void> _test() async {
-    setState(() {
-      _testing = true;
-      _result = '';
-    });
-    try {
-      await ReminderAlarmService.instance.scheduleTest();
-      _result = '✅ Naka-schedule ang test! I-lock mo na ang phone at hintayin ang 10 seconds.';
-    } catch (e) {
-      _result = '❌ ERROR sa pag-schedule:\n$e';
+  // ───────────────────────── Reminders ─────────────────────────
+
+  Future<void> _setRemindersOn(bool on) async {
+    HapticFeedback.lightImpact();
+    await _save(() => _alarms.setEnabled(on),
+        ok: on ? 'Reminders ON 🔔 — tutunog na si Zoe' : 'Reminders OFF 🔕 — walang tutunog');
+  }
+
+  Future<void> _pickSound() async {
+    final s = await showSoundPicker(context, _p, _alarms.sound.value);
+    if (s == null || s == _alarms.sound.value) return;
+    await _save(() => _alarms.setSound(s), ok: 'Alarm sound: ${s.label}');
+  }
+
+  Future<void> _setVibrate(bool on) =>
+      _save(() => _alarms.setVibrate(on), ok: on ? 'Vibration ON' : 'Vibration OFF');
+
+  Future<void> _pickSnooze() async {
+    final m = await showSnoozePicker(context, _p, _alarms.defaultSnooze.value);
+    if (m == null || m == _alarms.defaultSnooze.value) return;
+    await _save(() => _alarms.setDefaultSnooze(m), ok: 'Default snooze: $m minutes');
+  }
+
+  Future<void> _openReminderSetup() async {
+    await context.push('/reminders/setup');
+    await _loadSetup();
+  }
+
+  // ───────────────────────── Privacy & Memory ─────────────────────────
+
+  Future<void> _clearChats() async {
+    final ok = await confirmAction(
+      context,
+      palette: _p,
+      title: 'Clear chat history?',
+      message: 'Mabubura ang lahat ng usapan ninyo ni Zoe. '
+          'Hindi ito mababawi. Hindi mabubura ang tasks, reminders at notes.',
+      confirmLabel: 'Clear',
+    );
+    if (!ok) return;
+    await _save(_chats.clearAll, ok: 'Chat history cleared');
+  }
+
+  Future<void> _clearMemories() async {
+    final ok = await confirmAction(
+      context,
+      palette: _p,
+      title: "Clear Zoe's memories?",
+      message: 'Makakalimutan ni Zoe ang lahat ng natutunan niya tungkol sa iyo. '
+          'Hindi ito mababawi.',
+      confirmLabel: 'Clear',
+    );
+    if (!ok) return;
+    await _save(_memories.clearAll, ok: 'Memories cleared');
+  }
+
+  Future<void> _setLongTermMemory(bool on) async {
+    setState(() => _longTermMemory = on);
+    await _save(() => _settings.setLongTermMemory(on),
+        ok: on ? 'Zoe will remember what matters 💭' : "Zoe won't save new memories");
+  }
+
+  // ───────────────────────── Appearance ─────────────────────────
+
+  Future<void> _setDarkMode(bool on) async {
+    setState(() => _darkMode = on);
+    await _save(() => _settings.setDarkMode(on));
+  }
+
+  // ───────────────────────── About / Developer ─────────────────────────
+
+  Future<void> _tapVersion() async {
+    if (_developer) {
+      ZoeSnack.show(context, 'Developer options are already on');
+      return;
     }
-    _testing = false;
-    await _refresh();
+    _versionTaps++;
+    final left = _tapsToUnlock - _versionTaps;
+    if (left <= 0) {
+      _versionTaps = 0;
+      await _save(() => _settings.setDeveloperUnlocked(true), ok: 'Developer options unlocked 🛠️');
+      if (mounted) setState(() => _developer = true);
+    } else if (left <= 3) {
+      ZoeSnack.show(context, '$left more ${left == 1 ? 'tap' : 'taps'} to developer options');
+    }
   }
 
-  String _hm(DateTime t) {
-    final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
-    final m = t.minute.toString().padLeft(2, '0');
-    return '${t.month}/${t.day}  $h:$m ${t.hour < 12 ? 'AM' : 'PM'}';
+  Future<void> _openDeveloper() async {
+    final result = await context.push<String>('/settings/developer');
+    if (result == 'hidden' && mounted) {
+      setState(() => _developer = false);
+      ZoeSnack.show(context, 'Developer options hidden');
+    }
   }
+
+  // ───────────────────────── UI ─────────────────────────
+
+  String _setupSubtitle() {
+    final s = _setup;
+    if (s == null) return 'Checking…';
+    if (s.allOk) return 'All set — ${s.readyCount}/${s.items.length} ready';
+    if (!s.criticalOk) return 'Needs setup — reminders may not ring';
+    return '${s.readyCount}/${s.items.length} ready · tap to finish';
+  }
+
+  Color? _setupColor() {
+    final s = _setup;
+    if (s == null) return null;
+    if (s.allOk) return _p.mint;
+    return s.criticalOk ? _p.amber : _p.coral;
+  }
+
+  String _count(int n, String one, String many) => n == 0
+      ? 'Empty'
+      : '$n ${n == 1 ? one : many}';
 
   @override
   Widget build(BuildContext context) {
-    final lastError = ReminderAlarmService.instance.lastError;
-    return Scaffold(
-      backgroundColor: _cream,
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              const Text(
-                'Alarm Check',
-                style: TextStyle(
-                    fontFamily: 'Poppins', fontSize: 26, fontWeight: FontWeight.w700, color: _ink),
-              ),
-              const Text('Pansamantala — para ma-test ang reminders.',
-                  style: TextStyle(fontFamily: 'Poppins', color: Colors.black54)),
-              const SizedBox(height: 20),
+    final p = _p;
+    final remindersOn = _alarms.enabled.value;
 
-              _section('1. Reminder Setup (permissions)'),
-              _setupCard(),
-              const SizedBox(height: 24),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: (_darkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(statusBarColor: Colors.transparent),
+      child: Scaffold(
+        backgroundColor: p.bg,
+        body: SafeArea(
+          bottom: false,
+          child: _loading
+              ? Center(child: CircularProgressIndicator(color: p.accent))
+              : RefreshIndicator(
+                  color: p.accent,
+                  onRefresh: _load,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: 40),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 26),
+                        child: Text('Settings', style: SettingsText.title(p)),
+                      ),
 
-              _section('2. Test'),
-              SizedBox(
-                height: 52,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: _lavender),
-                  onPressed: _testing ? null : _test,
-                  icon: const Icon(Icons.alarm_rounded),
-                  label: const Text('Tumunog after 10 seconds'),
-                ),
-              ),
-              if (_result.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SelectableText(_result, style: const TextStyle(fontSize: 14)),
-              ],
-              const SizedBox(height: 24),
+                      // 1. Profile
+                      ProfileCard(
+                        name: _profile?.name ?? '',
+                        since: _profile?.createdAt,
+                        onEdit: _editName,
+                      ),
 
-              _section('3. Naka-schedule na alarms (${_alarms.length})'),
-              if (_alarms.isEmpty)
-                const Text(
-                  'Wala. Kung may ginawa kang reminder sa future at wala siya dito, '
-                  'hindi siya na-schedule.',
-                  style: TextStyle(color: _coral),
-                ),
-              for (final a in _alarms)
-                Card(
-                  child: ListTile(
-                    dense: true,
-                    leading: const Icon(Icons.alarm_on_rounded, color: _mint),
-                    title: Text(ReminderAlarmService.readPayload(a).title),
-                    subtitle: Text('id ${a.id} · tutunog ${_hm(a.dateTime)}'),
+                      // 2. Zoe Chat
+                      SettingsSection('Zoe language', palette: p),
+                      SettingsSegmented<ZoeLanguage>(
+                        values: ZoeLanguage.values,
+                        selected: _language,
+                        label: (l) => l.label,
+                        onChanged: _setLanguage,
+                        palette: p,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+                        child: Text(
+                          'Para sa Zoe Chat lang. Naiintindihan ka pa rin ni Zoe '
+                          'sa English, Tagalog o Taglish.',
+                          style: SettingsText.body(p).copyWith(fontSize: 13),
+                        ),
+                      ),
+
+                      // 3. Zoe's Brain
+                      SettingsSection("Zoe's brain", palette: p),
+                      BrainCard(
+                        info: _model,
+                        palette: p,
+                        busy: _busy,
+                        onDownload: _downloadModel,
+                        onCancel: _cancelDownload,
+                        onUpdate: _updateModel,
+                        onDelete: _deleteModel,
+                      ),
+
+                      // 4. Reminders
+                      SettingsSection('Reminders', palette: p),
+                      SettingsTile.toggle(
+                        icon: remindersOn
+                            ? Icons.notifications_active_outlined
+                            : Icons.notifications_off_outlined,
+                        title: 'Reminders',
+                        subtitle: remindersOn
+                            ? 'Zoe will ring for your reminders'
+                            : 'OFF — no reminder will ring',
+                        value: remindersOn,
+                        onChanged: _setRemindersOn,
+                        palette: p,
+                      ),
+                      SettingsTile.nav(
+                        icon: Icons.music_note_outlined,
+                        title: 'Alarm sound',
+                        subtitle: _alarms.sound.value.label,
+                        onTap: _pickSound,
+                        palette: p,
+                      ),
+                      SettingsTile.toggle(
+                        icon: Icons.vibration_rounded,
+                        title: 'Vibration',
+                        subtitle: 'Vibrate while a reminder rings',
+                        value: _alarms.vibrate.value,
+                        onChanged: _setVibrate,
+                        palette: p,
+                      ),
+                      SettingsTile.nav(
+                        icon: Icons.snooze_rounded,
+                        title: 'Default snooze',
+                        subtitle: '${_alarms.defaultSnooze.value} minutes',
+                        onTap: _pickSnooze,
+                        palette: p,
+                      ),
+                      SettingsTile.nav(
+                        icon: Icons.tune_rounded,
+                        title: 'Reminder Setup',
+                        subtitle: _setupSubtitle(),
+                        subtitleColor: _setupColor(),
+                        onTap: _openReminderSetup,
+                        palette: p,
+                        showDivider: false,
+                      ),
+
+                      // 5. Privacy & Memory
+                      SettingsSection('Privacy & memory', palette: p),
+                      _PrivacyBanner(palette: p),
+                      SettingsTile(
+                        icon: Icons.forum_outlined,
+                        title: 'Chat history',
+                        subtitle: _count(_chatCount, 'message', 'messages'),
+                        onTap: () => context.push('/settings/chat-history'),
+                        palette: p,
+                        trailing: _ClearButton(
+                          palette: p,
+                          onTap: _chatCount == 0 ? null : _clearChats,
+                        ),
+                      ),
+                      SettingsTile(
+                        icon: Icons.auto_awesome_outlined,
+                        title: "Zoe's memories",
+                        subtitle: _count(_memoryCount, 'memory', 'memories'),
+                        onTap: () => context.push('/settings/memories'),
+                        palette: p,
+                        trailing: _ClearButton(
+                          palette: p,
+                          onTap: _memoryCount == 0 ? null : _clearMemories,
+                        ),
+                      ),
+                      SettingsTile.toggle(
+                        icon: Icons.psychology_outlined,
+                        title: 'Long-term memory',
+                        subtitle: _longTermMemory
+                            ? 'Zoe remembers what matters to you'
+                            : "Zoe won't save new memories",
+                        value: _longTermMemory,
+                        onChanged: _setLongTermMemory,
+                        palette: p,
+                        showDivider: false,
+                      ),
+
+                      // 6. Appearance
+                      SettingsSection('Appearance', palette: p),
+                      SettingsTile.toggle(
+                        icon: Icons.dark_mode_outlined,
+                        title: 'Dark mode',
+                        subtitle: 'Easier on the eyes at night',
+                        value: _darkMode,
+                        onChanged: _setDarkMode,
+                        palette: p,
+                        showDivider: false,
+                      ),
+
+                      // 7. About (+ 8. Developer kapag na-unlock)
+                      SettingsSection('About', palette: p),
+                      SettingsTile(
+                        icon: Icons.info_outline_rounded,
+                        title: 'App version',
+                        subtitle: '${AppConfig.version} (build ${AppConfig.build})',
+                        onTap: _tapVersion,
+                        palette: p,
+                      ),
+                      SettingsTile(
+                        icon: Icons.favorite_outline_rounded,
+                        title: AppConfig.appName,
+                        subtitle: 'Made by ${AppConfig.company}',
+                        palette: p,
+                      ),
+                      SettingsTile.nav(
+                        icon: Icons.shield_outlined,
+                        title: 'Terms & Privacy',
+                        subtitle: 'How Zoe keeps your data safe',
+                        onTap: () => showPolicySheet(context),
+                        palette: p,
+                        showDivider: _developer,
+                      ),
+                      if (_developer)
+                        SettingsTile.nav(
+                          icon: Icons.build_outlined,
+                          title: 'Developer',
+                          subtitle: 'Alarm Check & debug tools',
+                          onTap: _openDeveloper,
+                          palette: p,
+                          showDivider: false,
+                          iconColor: p.amber,
+                        ),
+                    ],
                   ),
                 ),
-              const SizedBox(height: 24),
-
-              _section('4. Huling error'),
-              SelectableText(lastError ?? 'Wala ✅',
-                  style: TextStyle(color: lastError == null ? _mint : _coral)),
-              const SizedBox(height: 12),
-              TextButton.icon(
-                onPressed: _refresh,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Refresh'),
-              ),
-            ],
-          ),
         ),
       ),
     );
   }
+}
 
-  Widget _section(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(text,
-            style: const TextStyle(
-                fontFamily: 'Poppins', fontSize: 16, fontWeight: FontWeight.w700, color: _ink)),
-      );
+/// "Lahat ng data mo ay nasa phone mo lang" — mint banner.
+class _PrivacyBanner extends StatelessWidget {
+  final SettingsPalette palette;
+  const _PrivacyBanner({required this.palette});
 
-  Widget _setupCard() {
-    final s = _setup;
-    if (s == null) return const Card(child: ListTile(title: Text('checking…')));
-    final color = s.allOk ? _mint : (s.criticalOk ? const Color(0xFFF0AA45) : _coral);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: palette.mint.withValues(alpha: palette.dark ? 0.16 : 0.12),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
           children: [
-            Text('${s.readyCount}/${s.items.length} ready · ${s.manufacturer} · SDK ${s.sdkInt}',
-                style: TextStyle(fontWeight: FontWeight.w700, color: color)),
-            const SizedBox(height: 6),
-            for (final i in s.items)
-              Text('${s.isOk(i) ? '✅' : '❌'}  ${i.name}', style: const TextStyle(fontSize: 13)),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: _lavender),
-              onPressed: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ReminderSetupScreen()),
-                );
-                await _refresh();
-              },
-              icon: const Icon(Icons.tune_rounded),
-              label: const Text('Buksan ang Reminder Setup'),
+            Icon(Icons.lock_outline_rounded, color: palette.mint, size: 26),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Lahat ng data mo ay nasa phone mo lang',
+                      style: SettingsText.tileTitle(palette).copyWith(fontSize: 16)),
+                  const SizedBox(height: 2),
+                  Text('Walang account, walang upload. Your data stays on this phone.',
+                      style: SettingsText.body(palette).copyWith(fontSize: 13)),
+                ],
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Maliit na "Clear" button sa dulo ng row. null onTap = disabled (walang laman).
+class _ClearButton extends StatelessWidget {
+  final SettingsPalette palette;
+  final VoidCallback? onTap;
+  const _ClearButton({required this.palette, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: palette.coral,
+        disabledForegroundColor: palette.sectionLabel.withValues(alpha: 0.5),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: const Text('Clear', style: SettingsText.button),
     );
   }
 }

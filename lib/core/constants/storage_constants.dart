@@ -10,5 +10,7 @@ class StorageConstants {
   static const taskHistoryTable = 'task_history';
   static const notesTable = 'notes';
   static const eventsTable = 'events';
-  static const conversationsTable = 'conversations';
+  static const conversationsTable = 'ai_conversations';
+  static const messagesTable = 'ai_messages';
+  static const memoriesTable = 'memories';
 }

@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
-import 'package:alarm/utils/alarm_set.dart'; // ← IDAGDAG
+import 'package:alarm/utils/alarm_set.dart';
 
 class ReminderRingingScreen extends StatefulWidget {
   const ReminderRingingScreen({super.key, required this.alarm});
@@ -379,31 +379,35 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
         ),
       );
 
-  Widget _snoozeChip(int minutes) => Material(
-        color: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: _lavender.withValues(alpha: 0.5), width: 1.5),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: _busy ? null : () => _snooze(minutes),
-          child: SizedBox(
-            height: 52,
-            child: Center(
-              child: Text(
-                '$minutes min',
-                style: const TextStyle(
-                  fontFamily: _font,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: _lavender,
-                ),
+  /// Ang default snooze (Settings › Reminders) ay naka-fill na lavender.
+  Widget _snoozeChip(int minutes) {
+    final isDefault = minutes == ReminderAlarmService.instance.defaultSnooze.value;
+    return Material(
+      color: isDefault ? _lavender : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: _lavender.withValues(alpha: 0.5), width: 1.5),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: _busy ? null : () => _snooze(minutes),
+        child: SizedBox(
+          height: 52,
+          child: Center(
+            child: Text(
+              '$minutes min',
+              style: TextStyle(
+                fontFamily: _font,
+                fontSize: 16,
+                fontWeight: isDefault ? FontWeight.w700 : FontWeight.w600,
+                color: isDefault ? Colors.white : _lavender,
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 
   Widget _circleAction({
     required IconData icon,

@@ -12,6 +12,7 @@ import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/reminders/models/alarm_sound.dart';
 
 /// Info na pinapakita sa ringing screen (galing sa payload).
 class RingInfo {
@@ -27,13 +28,15 @@ class ReminderAlarmService {
   ReminderAlarmService._();
   static final ReminderAlarmService instance = ReminderAlarmService._();
 
-  static const String musicPath = 'assets/music/Morning_Zoe.mp3';
   static const List<int> snoozeOptions = [5, 10, 30];
   static const MethodChannel _lockChannel = MethodChannel('zoe/alarm_screen');
 
   /// Kulay ng notification (lavender na may pagka-blue).
   static const Color notifColor = Color(0xFF7B8CE6);
   static const _kEnabled = 'reminders_enabled';
+  static const _kSound = 'alarm_sound';
+  static const _kVibrate = 'alarm_vibrate';
+  static const _kSnooze = 'snooze_default';
 
   final _repo = ReminderRepository();
   final _settings = SettingsRepository();
@@ -41,13 +44,20 @@ class ReminderAlarmService {
   /// Master switch ng reminders (bell button sa Home).
   /// true = tutunog, false = walang alarm na ise-set.
   final ValueNotifier<bool> enabled = ValueNotifier(true);
+
+  /// Settings › Reminders. Naka-save sa settings table.
+  final ValueNotifier<AlarmSound> sound = ValueNotifier(AlarmSound.morningZoe);
+  final ValueNotifier<bool> vibrate = ValueNotifier(true);
+
+  /// Unang lalabas / naka-highlight sa ringing screen (5 / 10 / 30).
+  final ValueNotifier<int> defaultSnooze = ValueNotifier(10);
   StreamSubscription<AlarmSet>? _ringSub;
   int? _showingId;
 
   /// Para mag-refresh ang Home pagkatapos ng Done / Dismiss / Snooze.
   final ValueNotifier<int> changes = ValueNotifier(0);
 
-  /// Huling error (pinapakita sa Alarm Check screen sa Settings).
+  /// Huling error (pinapakita sa Developer › Alarm Check).
   String? lastError;
 
   /// Id ng test alarm (hindi galing sa database).
@@ -92,6 +102,60 @@ class ReminderAlarmService {
     changes.value++;
   }
 
+  // ───────────────────────── Sound / vibration / snooze (Settings) ─────────────────────────
+
+  /// Basahin ang naka-save na sound / vibration / default snooze.
+  Future<void> loadPrefs() async {
+    try {
+      sound.value = AlarmSound.fromName(await _settings.getValue(_kSound));
+      vibrate.value = await _settings.getValue(_kVibrate) != 'false';
+      final snooze = int.tryParse(await _settings.getValue(_kSnooze) ?? '');
+      defaultSnooze.value =
+          (snooze != null && snoozeOptions.contains(snooze)) ? snooze : 10;
+    } catch (e) {
+      lastError = 'Load alarm prefs failed: $e';
+    }
+  }
+
+  Future<void> setSound(AlarmSound s) async {
+    sound.value = s;
+    await _settings.setValue(_kSound, s.name);
+    await _restyleScheduled();
+  }
+
+  Future<void> setVibrate(bool on) async {
+    vibrate.value = on;
+    await _settings.setValue(_kVibrate, on ? 'true' : 'false');
+    await _restyleScheduled();
+  }
+
+  Future<void> setDefaultSnooze(int minutes) async {
+    if (!snoozeOptions.contains(minutes)) return;
+    defaultSnooze.value = minutes;
+    await _settings.setValue(_kSnooze, '$minutes');
+  }
+
+  /// Ilapat ang bagong sound / vibration sa mga naka-schedule na alarm.
+  /// Pareho pa rin ang oras at payload (kasama ang naka-snooze).
+  /// Hindi ginagalaw ang kasalukuyang nagri-ring.
+  Future<void> _restyleScheduled() async {
+    try {
+      for (final a in await Alarm.getAlarms()) {
+        if (await Alarm.isRinging(a.id)) continue;
+        if (!a.dateTime.isAfter(DateTime.now())) continue;
+        await Alarm.set(
+          alarmSettings: a.copyWith(
+            assetAudioPath: sound.value.asset,
+            vibrate: vibrate.value,
+          ),
+        );
+      }
+    } catch (e) {
+      lastError = 'Updating alarm sound failed: $e';
+      debugPrint(lastError);
+    }
+  }
+
   Future<void> _stopAllScheduled() async {
     try {
       for (final a in await Alarm.getAlarms()) {
@@ -128,6 +192,7 @@ class ReminderAlarmService {
   /// Hindi ginagalaw ang alarm na naka-schedule na (hal. naka-snooze)
   /// o kasalukuyang nagri-ring.
   Future<void> syncAll() async {
+    await loadPrefs();
     if (!await loadEnabled()) {
       await _stopAllScheduled(); // naka-OFF ang reminders
       return;
@@ -244,9 +309,9 @@ class ReminderAlarmService {
     final settings = AlarmSettings(
       id: id,
       dateTime: dateTime,
-      assetAudioPath: musicPath,
+      assetAudioPath: sound.value.asset, // Settings › Reminders › Alarm sound
       loopAudio: true, // tuloy-tuloy ang music hanggang may pinindot
-      vibrate: true, // vibrate kahit naka-lock
+      vibrate: vibrate.value, // Settings › Reminders › Vibration
       androidFullScreenIntent: true, // gigisingin ang screen
       androidStopAlarmOnTermination: false, // tutunog pa rin kahit i-swipe ang app
       warningNotificationOnKill: Platform.isIOS,
