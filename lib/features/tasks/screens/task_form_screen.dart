@@ -6,6 +6,7 @@ import 'package:zoe_remind/database/models/task.dart';
 import 'package:zoe_remind/database/models/task_category.dart';
 import 'package:zoe_remind/database/repositories/task_category_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
+import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/reminders/widgets/new_reminder_widgets.dart';
 import 'package:zoe_remind/features/tasks/widgets/category_sheet.dart';
@@ -19,10 +20,17 @@ enum _QuickPick { today, tomorrow, weekend, noDate, custom }
 ///
 /// History 🔒 task (done, at lumipas na ang araw) → read-only:
 /// walang edit, walang delete.
+///
+/// Galing sa Zoe chat ([draft] != null): naka-prefill ang form, at kapag
+/// na-save, ang bagong task id (int) ang ibinabalik sa chat.
 class TaskFormScreen extends StatefulWidget {
   /// null = create a new task
   final int? taskId;
-  const TaskFormScreen({super.key, this.taskId});
+
+  /// Hindi pa naka-save na task galing sa Zoe chat (Edit button).
+  final TaskDraft? draft;
+
+  const TaskFormScreen({super.key, this.taskId, this.draft});
 
   @override
   State<TaskFormScreen> createState() => _TaskFormScreenState();
@@ -50,6 +58,9 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
   bool get _isEdit => widget.taskId != null;
 
+  /// Binuksan mula sa Zoe chat card.
+  bool get _fromChat => widget.draft != null && !_isEdit;
+
   /// Done at lumipas na ang araw → history, hindi na mababago.
   bool get _locked => _original?.isLockedAt(DateTime.now()) ?? false;
 
@@ -60,6 +71,16 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     _loading = true;
     if (_isEdit) {
       _loadTask();
+    } else if (widget.draft != null) {
+      // Galing sa Zoe chat → ilagay ang naintindihan ni Zoe.
+      final d = widget.draft!;
+      _title.text = d.title;
+      _notes.text = d.notes ?? '';
+      _date = d.date;
+      _time = d.date == null ? null : d.time; // walang araw → walang oras
+      _priority = d.priority;
+      _pick = _pickFor(_date);
+      _loadCategories(pickDefault: true);
     } else {
       _pick = _QuickPick.today;
       _date = _today;
@@ -73,7 +94,10 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
       if (!mounted) return;
       setState(() {
         _categories = cats;
-        if (pickDefault) _category = cats.defaultKey;
+        if (pickDefault) {
+          final wanted = widget.draft?.category;
+          _category = (wanted != null && cats.has(wanted)) ? wanted : cats.defaultKey;
+        }
         _loading = false;
       });
     } catch (e) {
@@ -260,8 +284,9 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     final notes = _notes.text.trim();
     try {
       final original = _original;
+      int? newId;
       if (original == null) {
-        await _repo.add(Task(
+        newId = await _repo.add(Task(
           title: _cleanTitle,
           description: notes.isEmpty ? null : notes,
           date: _date == null ? null : ZoeDate.key(_date!),
@@ -284,7 +309,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
         ));
       }
       if (!mounted) return;
-      context.pop(true);
+      // Zoe chat → id ng bagong task. Tasks screen → true (reload).
+      context.pop(_fromChat ? newId : true);
     } on TaskLockedException catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -381,13 +407,14 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: Row(
                   children: [
-                    ReminderBackButton(onTap: () => context.pop(false)),
+                    ReminderBackButton(
+                        onTap: () => context.pop(_fromChat ? null : false)),
                     const SizedBox(width: 22),
                     Expanded(
                       child: Text(
                           _locked
                               ? 'Task'
-                              : _isEdit
+                              : _isEdit || _fromChat
                                   ? 'Edit Task'
                                   : 'New Task',
                           style: ReminderText.screenTitle),
@@ -407,7 +434,9 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                   child: GradientButton(
-                    label: _isEdit ? 'Save changes' : 'Create task',
+                    label: _isEdit
+                        ? 'Save changes'
+                        : (_fromChat ? 'Save task' : 'Create task'),
                     loading: _saving,
                     onTap: _canSave ? _save : null,
                   ),

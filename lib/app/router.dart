@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/widgets/zoe_bottom_nav.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/screens/zoe_chat_screen.dart';
 import 'package:zoe_remind/features/home/screens/home_screen.dart';
 import 'package:zoe_remind/features/notes/screens/note_editor_screen.dart';
@@ -55,9 +56,13 @@ final appRouter = GoRouter(
     // New / Edit Reminder — outside the shell → full screen, no bottom nav.
     // From the Home + button:   context.push('/reminders/new')
     // Tapping a reminder:       context.push('/reminders/edit/<id>')
+    // Zoe chat card [Edit]:     context.push('/reminders/new', extra: ReminderDraft(...))
     GoRoute(
       path: '/reminders/new',
-      builder: (context, state) => const ReminderFormScreen(),
+      builder: (context, state) {
+        final extra = state.extra;
+        return ReminderFormScreen(draft: extra is ReminderDraft ? extra : null);
+      },
     ),
     GoRoute(
       path: '/reminders/edit/:id',
@@ -81,9 +86,13 @@ final appRouter = GoRouter(
     // New / Edit Task — also full screen, no bottom nav.
     // From the Tasks + button: context.push('/tasks/new')
     // Tapping a task:          context.push('/tasks/edit/<id>')
+    // Zoe chat card [Edit]:    context.push('/tasks/new', extra: TaskDraft(...))
     GoRoute(
       path: '/tasks/new',
-      builder: (context, state) => const TaskFormScreen(),
+      builder: (context, state) {
+        final extra = state.extra;
+        return TaskFormScreen(draft: extra is TaskDraft ? extra : null);
+      },
     ),
     GoRoute(
       path: '/tasks/edit/:id',

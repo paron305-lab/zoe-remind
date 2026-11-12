@@ -5,6 +5,7 @@ import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
+import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 import 'package:zoe_remind/features/reminders/widgets/delete_reminder_dialog.dart';
@@ -27,6 +28,10 @@ class ReminderFormResult {
 /// + button on Home → new.  Tapping a reminder on Home → edit.
 /// History 🔒 (done + lumipas na ang oras) → read-only, walang edit / delete.
 /// Pops a [ReminderFormResult] value when something changed, or null on back.
+///
+/// Galing sa Zoe chat ([draft] != null): naka-prefill ang form, at kapag
+/// na-save, ang bagong reminder id (int) ang ibinabalik para ma-update
+/// ng chat ang confirmation card.
 class ReminderFormScreen extends StatefulWidget {
   /// null = create a new reminder
   final int? reminderId;
@@ -34,7 +39,15 @@ class ReminderFormScreen extends StatefulWidget {
   /// true = binuksan mula sa naka-lock na item sa Home (?view=1).
   final bool readOnly;
 
-  const ReminderFormScreen({super.key, this.reminderId, this.readOnly = false});
+  /// Hindi pa naka-save na reminder galing sa Zoe chat (Edit button).
+  final ReminderDraft? draft;
+
+  const ReminderFormScreen({
+    super.key,
+    this.reminderId,
+    this.readOnly = false,
+    this.draft,
+  });
 
   @override
   State<ReminderFormScreen> createState() => _ReminderFormScreenState();
@@ -60,6 +73,9 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
 
   bool get _isEdit => widget.reminderId != null;
 
+  /// Binuksan mula sa Zoe chat card.
+  bool get _fromChat => widget.draft != null && !_isEdit;
+
   @override
   void initState() {
     super.initState();
@@ -67,6 +83,14 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
     if (_isEdit) {
       _loading = true;
       _loadReminder();
+    } else if (widget.draft != null) {
+      // Galing sa Zoe chat → ilagay ang naintindihan ni Zoe.
+      final d = widget.draft!;
+      _title.text = d.title;
+      _date = d.date ?? _today.add(const Duration(days: 1));
+      _time = d.time;
+      _repeat = d.repeat;
+      _pick = _pickFor(_date!);
     } else {
       // same default as the design: Tomorrow selected, time still empty
       _pick = _QuickPick.tomorrow;
@@ -286,8 +310,9 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
 
     try {
       final original = _original;
+      int? newId;
       if (original == null) {
-        final newId = await _repo.add(Reminder(
+        newId = await _repo.add(Reminder(
           title: _cleanTitle,
           date: _dateKey!,
           time: _timeKey!,
@@ -319,7 +344,12 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
         );
       }
       if (!mounted) return;
-      context.pop(original == null ? ReminderFormResult.created : ReminderFormResult.updated);
+      if (_fromChat) {
+        context.pop(newId); // Zoe chat → id ng bagong reminder
+      } else {
+        context.pop(
+            original == null ? ReminderFormResult.created : ReminderFormResult.updated);
+      }
     } catch (e) {
       debugPrint('Saving reminder failed: $e');
       if (!mounted) return;
@@ -373,7 +403,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
                       child: Text(
                           _locked
                               ? 'Reminder'
-                              : (_isEdit ? 'Edit Reminder' : 'New Reminder'),
+                              : (_isEdit || _fromChat ? 'Edit Reminder' : 'New Reminder'),
                           style: ReminderText.screenTitle),
                     ),
                     if (_isEdit && _original != null && !_locked)
@@ -392,7 +422,9 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
                 child: _locked
                     ? GradientButton(label: 'Close', onTap: () => context.pop())
                     : GradientButton(
-                        label: _isEdit ? 'Save changes' : 'Create reminder',
+                        label: _isEdit
+                            ? 'Save changes'
+                            : (_fromChat ? 'Save reminder' : 'Create reminder'),
                         loading: _saving,
                         onTap: _canSave ? _save : null,
                       ),
