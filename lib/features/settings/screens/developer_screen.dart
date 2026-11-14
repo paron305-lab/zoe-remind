@@ -5,9 +5,10 @@ import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
+import 'package:zoe_remind/features/settings/screens/brain_test_screen.dart';
 
 /// Developer (hidden): "Alarm Check" para ma-debug ang reminders sa phone
-/// (walang logs ang release APK). Lumalabas sa Settings › About pagkatapos
+/// (walang logs ang release APK), at "Brain Test" para kay Qwen. Lumalabas sa Settings › About pagkatapos
 /// i-tap ang app version nang 7 beses. Route: /settings/developer
 class DeveloperScreen extends StatefulWidget {
   const DeveloperScreen({super.key});
@@ -166,6 +167,23 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
                 onPressed: _refresh,
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Refresh'),
+              ),
+              const SizedBox(height: 24),
+
+              _section("5. Zoe's Brain (Qwen)"),
+              Text('I-load si Qwen sa phone at sukatin ang bilis at RAM.',
+                  style: TextStyle(fontFamily: 'Poppins', color: HomeColors.inkSoft)),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 52,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: _lavender),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const BrainTestScreen()),
+                  ),
+                  icon: const Icon(Icons.psychology_rounded),
+                  label: const Text('Buksan ang Brain Test'),
+                ),
               ),
             ],
           ),

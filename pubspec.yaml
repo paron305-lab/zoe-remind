@@ -20,6 +20,14 @@ dependencies:
   path_provider: ^2.1.6
   crypto: ^3.0.8
   connectivity_plus: ^7.3.2
+  llamadart: ^0.19.9
+
+# llamadart: llama.cpp lang (GGUF). Tinatanggal ang LiteRT-LM para lumiit ang APK.
+# Kapag binago ito: flutter clean && flutter pub get
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_runtimes: [llama_cpp]
 
 dev_dependencies:
   flutter_test:
