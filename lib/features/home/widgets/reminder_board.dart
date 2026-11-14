@@ -97,7 +97,7 @@ class _ReminderBoardState extends State<ReminderBoard> {
         maxHeight: _rowHeight * widget.maxVisibleRows,
       ),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: HomeColors.card,
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
@@ -128,7 +128,7 @@ class _ReminderBoardState extends State<ReminderBoard> {
                       : const NeverScrollableScrollPhysics(),
                   itemCount: items.length,
                   itemBuilder: (context, i) => _buildRow(items[i]),
-                  separatorBuilder: (_, __) => const Divider(
+                  separatorBuilder: (_, __) => Divider(
                       height: 1, thickness: 1, color: HomeColors.divider),
                 ),
               ),
@@ -156,7 +156,7 @@ class _BoardRow extends StatelessWidget {
     final row = _content();
     if (onTap == null) return row;
     return Material(
-      color: Colors.white,
+      color: HomeColors.card,
       child: InkWell(onTap: () => onTap!(item), child: row),
     );
   }
@@ -314,7 +314,7 @@ class ZoeCheckbox extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: checked ? HomeColors.lavender : Colors.white,
+              color: checked ? HomeColors.lavender : HomeColors.card,
               borderRadius: BorderRadius.circular(10),
               border: checked
                   ? null

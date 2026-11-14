@@ -185,9 +185,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: HomeColors.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        title: const Text(
+        title: Text(
           'Tapos mo na ba ito?',
           style: TextStyle(
               fontFamily: 'Poppins', fontWeight: FontWeight.w700, color: HomeColors.ink),
@@ -195,13 +195,13 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Text(
           '"${item.title}" — ${item.status.label(_language)} kanina. '
           'Kapag minark mo as done, mapupunta na ito sa history mo 🔒.',
-          style: const TextStyle(
+          style: TextStyle(
               fontFamily: 'Poppins', fontSize: 15, color: HomeColors.inkSoft, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hindi pa',
+            child: Text('Hindi pa',
                 style: TextStyle(
                     fontFamily: 'Poppins',
                     fontWeight: FontWeight.w700,
@@ -309,7 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (_loading)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.all(40),
                           child: Center(
                             child: CircularProgressIndicator(color: HomeColors.lavender),
@@ -328,7 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 20),
                       TimelineStats(tasksLeft: left, reminders: reminders, streak: 7),
                       if (_upcoming.isNotEmpty) ...[
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.fromLTRB(20, 28, 20, 14),
                           child: Text('Coming up', style: HomeText.sectionTitle),
                         ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 
 /// Notes design tokens (Screen 08 ng UI Design Concept).
@@ -7,9 +8,13 @@ class NoteColors {
   NoteColors._();
 
   static const amber = Color(0xFFF0AA45);
-  static const timeText = Color(0xFF9B99AB);
-  static const searchFill = Color(0xFFF3F5FD);
-  static const cardShadow = Color(0x0F2B2A3D);
+  static Color get timeText => ZoeTheme.pick(const Color(0xFF9B99AB), const Color(0xFF8E8BA3));
+  static Color get searchFill => ZoeTheme.pick(const Color(0xFFF3F5FD), const Color(0xFF2A2738));
+  static Color get cardShadow => ZoeTheme.pick(const Color(0x0F2B2A3D), const Color(0x33000000));
+
+  /// Placeholder / hint text.
+  static Color get hint => ZoeTheme.pick(const Color(0xFF8A8999), const Color(0xFF8E8BA3));
+  static Color get hintLight => ZoeTheme.pick(const Color(0xFFC9C7D6), const Color(0xFF5E5B73));
 
   /// Header: lavender → sky (gaya ng mockup).
   static const headerGradient = LinearGradient(
@@ -31,47 +36,47 @@ class NoteText {
   NoteText._();
   static const _f = 'Poppins';
 
-  static const screenTitle = TextStyle(
+  static TextStyle get screenTitle => TextStyle(
       fontFamily: _f, fontSize: 34, fontWeight: FontWeight.w700, color: Colors.white,
       height: 1.15);
-  static const search = TextStyle(
+  static TextStyle get search => TextStyle(
       fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w500, color: HomeColors.ink);
-  static const searchHint = TextStyle(
-      fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w400, color: Color(0xFF8A8999));
-  static const chip = TextStyle(fontFamily: _f, fontSize: 16, fontWeight: FontWeight.w700);
-  static const groupLabel = TextStyle(
+  static TextStyle get searchHint => TextStyle(
+      fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w400, color: NoteColors.hint);
+  static TextStyle get chip => TextStyle(fontFamily: _f, fontSize: 16, fontWeight: FontWeight.w700);
+  static TextStyle get groupLabel => TextStyle(
       fontFamily: _f, fontSize: 15, fontWeight: FontWeight.w700,
-      color: Color(0xFF8A8999), letterSpacing: 0.8);
-  static const cardTitle = TextStyle(
+      color: NoteColors.hint, letterSpacing: 0.8);
+  static TextStyle get cardTitle => TextStyle(
       fontFamily: _f, fontSize: 18, fontWeight: FontWeight.w700, color: HomeColors.ink,
       height: 1.3);
-  static const cardPreview = TextStyle(
+  static TextStyle get cardPreview => TextStyle(
       fontFamily: _f, fontSize: 15, fontWeight: FontWeight.w400, color: HomeColors.inkSoft,
       height: 1.45);
-  static const pill = TextStyle(
+  static TextStyle get pill => TextStyle(
       fontFamily: _f, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.6);
-  static const time = TextStyle(
+  static TextStyle get time => TextStyle(
       fontFamily: _f, fontSize: 13, fontWeight: FontWeight.w500, color: NoteColors.timeText);
 
   // Editor
-  static const editorTitle = TextStyle(
+  static TextStyle get editorTitle => TextStyle(
       fontFamily: _f, fontSize: 24, fontWeight: FontWeight.w700, color: HomeColors.ink,
       height: 1.3);
-  static const editorTitleHint = TextStyle(
-      fontFamily: _f, fontSize: 24, fontWeight: FontWeight.w700, color: Color(0xFFC9C7D6),
+  static TextStyle get editorTitleHint => TextStyle(
+      fontFamily: _f, fontSize: 24, fontWeight: FontWeight.w700, color: NoteColors.hintLight,
       height: 1.3);
-  static const editorBody = TextStyle(
+  static TextStyle get editorBody => TextStyle(
       fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w400, color: HomeColors.ink,
       height: 1.6);
-  static const editorBodyHint = TextStyle(
-      fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w400, color: Color(0xFFAAA8B8),
+  static TextStyle get editorBodyHint => TextStyle(
+      fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w400, color: NoteColors.hint,
       height: 1.6);
-  static const meta = TextStyle(
+  static TextStyle get meta => TextStyle(
       fontFamily: _f, fontSize: 13, fontWeight: FontWeight.w500, color: NoteColors.timeText);
 
-  static const emptyTitle = TextStyle(
+  static TextStyle get emptyTitle => TextStyle(
       fontFamily: _f, fontSize: 18, fontWeight: FontWeight.w700, color: HomeColors.ink);
-  static const emptyBody = TextStyle(
+  static TextStyle get emptyBody => TextStyle(
       fontFamily: _f, fontSize: 14, fontWeight: FontWeight.w500,
       color: HomeColors.inkSoft, height: 1.45);
 }

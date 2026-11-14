@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
@@ -24,8 +25,8 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
   static const _lavender = Color(0xFF8B7FE0);
   static const _coral = Color(0xFFF0768E);
   static const _mint = Color(0xFF3FBE93);
-  static const _ink = Color(0xFF2B2A3D);
-  static const _cream = Color(0xFFFBF6EF);
+  static Color get _ink => HomeColors.ink;
+  static Color get _cream => HomeColors.cream;
   static const _muted = Color(0xFF8E8AA3);
   static const _font = 'Poppins';
 
@@ -229,9 +230,9 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
         width: 320,
         padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: HomeColors.card,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: const Color(0xFFE9E5FA), width: 4),
+          border: Border.all(color: HomeColors.lavenderLight, width: 4),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.12),
@@ -265,7 +266,7 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
               _info.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: _font,
                 fontSize: 26,
                 fontWeight: FontWeight.w700,
@@ -291,7 +292,7 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
         width: double.infinity,
         padding: EdgeInsets.fromLTRB(
             24, 14, 24, 24 + MediaQuery.paddingOf(context).bottom),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: _cream,
           borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
         ),
@@ -302,7 +303,7 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
               width: 48,
               height: 5,
               decoration: BoxDecoration(
-                color: const Color(0xFFE4DDD0),
+                color: HomeColors.divider,
                 borderRadius: BorderRadius.circular(3),
               ),
             ),
@@ -338,9 +339,9 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
                   icon: Icons.close_rounded,
                   label: 'Dismiss',
                   size: 68,
-                  bg: const Color(0xFFF1EEFA),
+                  bg: HomeColors.lavenderLight,
                   fg: _muted,
-                  border: const Color(0xFFE2DDF5),
+                  border: HomeColors.divider,
                   onTap: _dismiss,
                 ),
               ],
@@ -383,7 +384,7 @@ class _ReminderRingingScreenState extends State<ReminderRingingScreen>
   Widget _snoozeChip(int minutes) {
     final isDefault = minutes == ReminderAlarmService.instance.defaultSnooze.value;
     return Material(
-      color: isDefault ? _lavender : Colors.white,
+      color: isDefault ? _lavender : HomeColors.card,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(color: _lavender.withValues(alpha: 0.5), width: 1.5),

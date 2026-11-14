@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
@@ -243,7 +244,8 @@ class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
     _now = now;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+      value: (ZoeTheme.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(statusBarColor: Colors.transparent),
       child: Scaffold(
         backgroundColor: HomeColors.cream,
         floatingActionButton: ZoeFab(onTap: _openNew, size: 64),
@@ -268,7 +270,7 @@ class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
                   onChanged: (f) => setState(() => _filter = f),
                 ),
                 if (_loading)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.all(48),
                     child: Center(
                       child: CircularProgressIndicator(color: HomeColors.lavender),
@@ -351,7 +353,7 @@ class _Header extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Tasks', style: TaskText.screenTitle),
+                Text('Tasks', style: TaskText.screenTitle),
                 const SizedBox(height: 4),
                 Text(subtitle, style: TaskText.subtitle),
               ],
@@ -401,7 +403,7 @@ class _SearchField extends StatelessWidget {
         decoration: InputDecoration(
           hintText: 'Search tasks…',
           hintStyle: TaskText.cardMeta,
-          prefixIcon: const Icon(Icons.search_rounded, color: HomeColors.lavender),
+          prefixIcon: Icon(Icons.search_rounded, color: HomeColors.lavender),
           filled: true,
           fillColor: TaskColors.searchFill,
           contentPadding: const EdgeInsets.symmetric(vertical: 18),
@@ -441,15 +443,15 @@ class _ErrorState extends StatelessWidget {
       padding: const EdgeInsets.all(40),
       child: Column(
         children: [
-          const Text("Hindi ko ma-load ang tasks mo",
+          Text("Hindi ko ma-load ang tasks mo",
               textAlign: TextAlign.center, style: TaskText.emptyTitle),
           const SizedBox(height: 6),
-          const Text('Something went wrong reading your tasks.',
+          Text('Something went wrong reading your tasks.',
               textAlign: TextAlign.center, style: TaskText.emptyBody),
           const SizedBox(height: 16),
           TextButton(
             onPressed: onRetry,
-            child: const Text('Try again',
+            child: Text('Try again',
                 style: TextStyle(
                     fontFamily: 'Poppins',
                     fontWeight: FontWeight.w700,

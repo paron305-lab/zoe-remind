@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
@@ -179,7 +180,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
         colorScheme: Theme.of(ctx).colorScheme.copyWith(
               primary: HomeColors.lavender,
               onPrimary: Colors.white,
-              surface: Colors.white,
+              surface: HomeColors.card,
+              onSurface: HomeColors.ink,
             ),
       );
 
@@ -397,7 +399,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+      value: (ZoeTheme.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(statusBarColor: Colors.transparent),
       child: Scaffold(
         backgroundColor: HomeColors.cream,
         body: SafeArea(
@@ -426,7 +429,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
               ),
               Expanded(
                 child: _loading
-                    ? const Center(
+                    ? Center(
                         child: CircularProgressIndicator(color: HomeColors.lavender))
                     : _form(),
               ),
@@ -502,7 +505,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () => setState(() => _time = null),
-                child: const Text('Clear time',
+                child: Text('Clear time',
                     style: TextStyle(
                         fontFamily: 'Poppins',
                         fontWeight: FontWeight.w700,
@@ -618,7 +621,7 @@ class _InputBox extends StatelessWidget {
             : ReminderText.fieldHint.copyWith(fontSize: 15, fontWeight: FontWeight.w500),
         counterText: '',
         filled: true,
-        fillColor: big ? const Color(0xFFF6F4FD) : Colors.white,
+        fillColor: big ? HomeColors.fieldFill : HomeColors.card,
         contentPadding: EdgeInsets.symmetric(horizontal: 24, vertical: big ? 24 : 18),
         enabledBorder: border(big ? const Color(0xFFB7ACEB) : HomeColors.divider, 1.5),
         focusedBorder: border(HomeColors.lavender, 2),

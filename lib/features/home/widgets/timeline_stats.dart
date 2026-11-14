@@ -23,11 +23,11 @@ class TimelineStats extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text("Today's timeline", style: HomeText.sectionTitle),
+              Text("Today's timeline", style: HomeText.sectionTitle),
               const Spacer(),
               GestureDetector(
                 onTap: onSeeAll,
-                child: const Text('See all', style: HomeText.link),
+                child: Text('See all', style: HomeText.link),
               ),
             ],
           ),

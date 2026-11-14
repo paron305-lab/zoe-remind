@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:zoe_remind/core/constants/asset_paths.dart';
 import 'package:zoe_remind/core/constants/policy.dart';
@@ -244,7 +245,7 @@ void showPolicySheet(BuildContext context) {
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    backgroundColor: Colors.white,
+    backgroundColor: ZoeTheme.pick(Colors.white, const Color(0xFF221F30)),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -257,7 +258,7 @@ void showPolicySheet(BuildContext context) {
         controller: scrollController,
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
         children: [
-          const Text(
+          Text(
             'Terms & Privacy Policy',
             style: TextStyle(
               fontFamily: 'Poppins',
@@ -278,7 +279,7 @@ void showPolicySheet(BuildContext context) {
           for (final section in ZoePolicy.sections) ...[
             Text(
               section.title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: 'Poppins',
                 fontSize: 16,
                 fontWeight: FontWeight.w600,

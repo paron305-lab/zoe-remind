@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 
 /// Zoe-Remind color system (from the Mobile UI Design Concept).
 /// Color always means something: lavender = primary/AI, mint = success,
@@ -11,8 +12,8 @@ class ZoeColors {
   static const coral = Color(0xFFF0768E);
   static const mint = Color(0xFF3FBE93);
   static const amber = Color(0xFFF0AA45);
-  static const ink = Color(0xFF2B2A3D);
-  static const cream = Color(0xFFFFF8EC);
+  static Color get ink => ZoeTheme.pick(const Color(0xFF2B2A3D), const Color(0xFFF2F0FA));
+  static Color get cream => ZoeTheme.pick(const Color(0xFFFFF8EC), const Color(0xFF16151F));
 
   /// Deeper lavender for text/icons on white (buttons, selected cards).
   static const lavenderDeep = Color(0xFF6E5CD6);

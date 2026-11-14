@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_avatar.dart';
 
@@ -6,16 +7,17 @@ class ReminderText {
   ReminderText._();
   static const _f = 'Poppins';
 
-  static const screenTitle = TextStyle(
+  static TextStyle get screenTitle => TextStyle(
       fontFamily: _f, fontSize: 22, fontWeight: FontWeight.w700, color: HomeColors.ink);
-  static const label = TextStyle(
+  static TextStyle get label => TextStyle(
       fontFamily: _f, fontSize: 14, fontWeight: FontWeight.w700,
       color: HomeColors.inkSoft, letterSpacing: 0.4);
-  static const field = TextStyle(
+  static TextStyle get field => TextStyle(
       fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w700, color: HomeColors.ink);
-  static const fieldHint = TextStyle(
-      fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w600, color: Color(0xFFAAA8B8));
-  static const banner = TextStyle(
+  static TextStyle get fieldHint => TextStyle(
+      fontFamily: _f, fontSize: 17, fontWeight: FontWeight.w600,
+      color: ZoeTheme.pick(const Color(0xFFAAA8B8), const Color(0xFF8E8BA3)));
+  static TextStyle get banner => TextStyle(
       fontFamily: _f, fontSize: 15, fontWeight: FontWeight.w500,
       color: HomeColors.ink, height: 1.45);
   static const chip = TextStyle(fontFamily: _f, fontSize: 15, fontWeight: FontWeight.w700);
@@ -36,7 +38,7 @@ class ReminderBackButton extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: const SizedBox(
+        child: SizedBox(
           width: 56,
           height: 56,
           child: Icon(Icons.arrow_back_rounded, color: HomeColors.lavender, size: 28),
@@ -123,10 +125,10 @@ class PickerField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: HomeColors.card,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(22),
-        side: const BorderSide(color: HomeColors.divider, width: 1.5),
+        side: BorderSide(color: HomeColors.divider, width: 1.5),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(22),
@@ -146,7 +148,7 @@ class PickerField extends StatelessWidget {
                 ),
               ),
               if (showChevron)
-                const Icon(Icons.chevron_right_rounded,
+                Icon(Icons.chevron_right_rounded,
                     color: HomeColors.navInactive, size: 28),
             ],
           ),

@@ -194,7 +194,7 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
                 onChanged: (f) => setState(() => _filter = f),
               ),
               if (_loading)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.all(48),
                   child: Center(child: CircularProgressIndicator(color: HomeColors.lavender)),
                 )
@@ -244,15 +244,15 @@ class _ErrorState extends StatelessWidget {
       padding: const EdgeInsets.all(40),
       child: Column(
         children: [
-          const Text('Hindi ko ma-load ang notes mo',
+          Text('Hindi ko ma-load ang notes mo',
               textAlign: TextAlign.center, style: NoteText.emptyTitle),
           const SizedBox(height: 6),
-          const Text('Something went wrong reading your notes.',
+          Text('Something went wrong reading your notes.',
               textAlign: TextAlign.center, style: NoteText.emptyBody),
           const SizedBox(height: 16),
           TextButton(
             onPressed: onRetry,
-            child: const Text('Try again',
+            child: Text('Try again',
                 style: TextStyle(
                     fontFamily: 'Poppins',
                     fontWeight: FontWeight.w700,

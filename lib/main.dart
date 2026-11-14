@@ -2,6 +2,7 @@ import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/app/app.dart';
 import 'package:zoe_remind/app/router.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 
@@ -12,6 +13,7 @@ Future<void> main() async {
   // Read the database before the first screen, so new users
   // land on onboarding and returning users land on Home.
   onboardingDone.value = await SettingsRepository().isOnboardingDone();
+  await ZoeTheme.load(); // dark mode (Settings › Appearance)
 
   runApp(const ZoeApp());
 

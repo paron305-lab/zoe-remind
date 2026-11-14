@@ -11,9 +11,9 @@ Future<bool> confirmDeleteReminder(
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: HomeColors.card,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      title: const Text(
+      title: Text(
         'Delete this reminder?',
         style: TextStyle(
             fontFamily: 'Poppins', fontWeight: FontWeight.w700, color: HomeColors.ink),
@@ -22,13 +22,13 @@ Future<bool> confirmDeleteReminder(
         repeats
             ? '"$title" and all its repeats will be removed. Hindi na ito maibabalik.'
             : '"$title" will be removed. Hindi na ito maibabalik.',
-        style: const TextStyle(
+        style: TextStyle(
             fontFamily: 'Poppins', fontSize: 15, color: HomeColors.inkSoft, height: 1.4),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Cancel',
+          child: Text('Cancel',
               style: TextStyle(
                   fontFamily: 'Poppins',
                   fontWeight: FontWeight.w700,

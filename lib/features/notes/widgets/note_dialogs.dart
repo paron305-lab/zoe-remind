@@ -13,7 +13,7 @@ const _f = 'Poppins';
 Future<NoteAction?> showNoteActions(BuildContext context, Note note) {
   return showModalBottomSheet<NoteAction>(
     context: context,
-    backgroundColor: Colors.white,
+    backgroundColor: HomeColors.card,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -69,7 +69,7 @@ class _SheetRow extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       leading: Icon(icon, color: color, size: 26),
       title: Text(label,
-          style: const TextStyle(
+          style: TextStyle(
               fontFamily: _f, fontSize: 16, fontWeight: FontWeight.w600, color: HomeColors.ink)),
       onTap: onTap,
     );
@@ -80,7 +80,7 @@ class _SheetRow extends StatelessWidget {
 Future<NoteSort?> showNoteSort(BuildContext context, NoteSort current) {
   return showModalBottomSheet<NoteSort>(
     context: context,
-    backgroundColor: Colors.white,
+    backgroundColor: HomeColors.card,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -91,7 +91,7 @@ Future<NoteSort?> showNoteSort(BuildContext context, NoteSort current) {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text('Sort by', style: NoteText.cardTitle),
             ),
@@ -99,13 +99,13 @@ Future<NoteSort?> showNoteSort(BuildContext context, NoteSort current) {
               ListTile(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                 title: Text(s.label,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontFamily: _f,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                         color: HomeColors.ink)),
                 trailing: s == current
-                    ? const Icon(Icons.check_rounded, color: HomeColors.lavender)
+                    ? Icon(Icons.check_rounded, color: HomeColors.lavender)
                     : null,
                 onTap: () => Navigator.pop(ctx, s),
               ),
@@ -126,19 +126,19 @@ Future<bool> _ask(
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: HomeColors.card,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       title: Text(title,
-          style: const TextStyle(
+          style: TextStyle(
               fontFamily: _f, fontWeight: FontWeight.w700, color: HomeColors.ink)),
       content: Text(body,
-          style: const TextStyle(
+          style: TextStyle(
               fontFamily: _f, fontSize: 15, color: HomeColors.inkSoft, height: 1.4)),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
           child: Text(cancel,
-              style: const TextStyle(
+              style: TextStyle(
                   fontFamily: _f, fontWeight: FontWeight.w700, color: HomeColors.inkSoft)),
         ),
         TextButton(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 
@@ -18,9 +19,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
   static const _mint = Color(0xFF3FBE93);
   static const _coral = Color(0xFFF0768E);
   static const _amber = Color(0xFFF0AA45);
-  static const _ink = Color(0xFF2B2A3D);
-  static const _cream = Color(0xFFFBF6EF);
-  static const _muted = Color(0xFF8E8AA3);
+  static Color get _ink => HomeColors.ink;
+  static Color get _cream => HomeColors.cream;
+  static Color get _muted => HomeColors.navInactive;
   static const _font = 'Poppins';
 
   final _perms = ReminderPermissions.instance;
@@ -163,7 +164,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
                   Text(
                     'Phone: ${s.manufacturer} · Android SDK ${s.sdkInt}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12, color: _muted),
+                    style: TextStyle(fontSize: 12, color: _muted),
                   ),
                   const SizedBox(height: 16),
                   SizedBox(
@@ -209,7 +210,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
                   value: total == 0 ? 1 : s.readyCount / total,
                   strokeWidth: 6,
                   color: color,
-                  backgroundColor: Colors.white,
+                  backgroundColor: HomeColors.card,
                 ),
                 Text('${s.readyCount}/$total',
                     style: TextStyle(
@@ -220,7 +221,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
           const SizedBox(width: 14),
           Expanded(
             child: Text(text,
-                style: const TextStyle(fontFamily: _font, fontSize: 14, color: _ink)),
+                style: TextStyle(fontFamily: _font, fontSize: 14, color: _ink)),
           ),
         ],
       ),
@@ -236,7 +237,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: HomeColors.card,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: ok ? _mint.withValues(alpha: 0.4) : badColor.withValues(alpha: 0.5),
@@ -252,7 +253,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
               const SizedBox(width: 10),
               Expanded(
                 child: Text(_title(item),
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontFamily: _font,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -265,7 +266,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen>
             ],
           ),
           const SizedBox(height: 6),
-          Text(_why(item), style: const TextStyle(fontSize: 13, color: _muted)),
+          Text(_why(item), style: TextStyle(fontSize: 13, color: _muted)),
           if (!ok) ...[
             const SizedBox(height: 12),
             Wrap(

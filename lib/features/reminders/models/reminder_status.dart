@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
@@ -55,10 +56,10 @@ extension ReminderStatusX on ReminderStatus {
       };
 
   Color get background => switch (this) {
-        ReminderStatus.history => const Color(0xFFE4F7EF),
-        ReminderStatus.dismissed => const Color(0xFFFDF1DD),
-        ReminderStatus.missed => const Color(0xFFFCE6EC),
-        _ => const Color(0xFFEDEAFB),
+        ReminderStatus.history => HomeColors.mintLight,
+        ReminderStatus.dismissed => HomeColors.amberLight,
+        ReminderStatus.missed => HomeColors.coralLight,
+        _ => HomeColors.lavenderLight,
       };
 }
 

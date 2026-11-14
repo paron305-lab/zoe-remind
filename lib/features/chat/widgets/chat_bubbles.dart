@@ -45,8 +45,8 @@ class ZoeSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: padding,
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: ChatColors.surface,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(24),
           topRight: Radius.circular(24),
@@ -193,7 +193,7 @@ class _TypingBubbleState extends State<TypingBubble> with SingleTickerProviderSt
         width: 9,
         height: 9,
         decoration: BoxDecoration(
-          color: Color.lerp(const Color(0xFFC9C2F2), HomeColors.lavender, up),
+          color: Color.lerp(ChatColors.dotLow, HomeColors.lavender, up),
           shape: BoxShape.circle,
         ),
       ),
@@ -273,10 +273,10 @@ class ClarifyBubble extends StatelessWidget {
                   ActionChip(
                     label: Text(c.label, style: ChatText.chip),
                     avatar: c.time == null
-                        ? const Icon(Icons.schedule_rounded, size: 18, color: HomeColors.lavender)
+                        ? Icon(Icons.schedule_rounded, size: 18, color: HomeColors.lavender)
                         : null,
-                    backgroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFFD9D3F5), width: 1.5),
+                    backgroundColor: ChatColors.surface,
+                    side: BorderSide(color: ChatColors.chipBorder, width: 1.5),
                     shape: const StadiumBorder(),
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                     onPressed: () => onChip(c),
@@ -286,7 +286,7 @@ class ClarifyBubble extends StatelessWidget {
           ],
           if (!entry.answered && entry.wantsText) ...[
             const SizedBox(height: 6),
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(left: 4),
               child: Text('Type your answer below 👇', style: ChatText.footnote),
             ),

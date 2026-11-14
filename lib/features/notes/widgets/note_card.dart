@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/database/models/note.dart';
 import 'package:zoe_remind/features/notes/widgets/note_styles.dart';
 
@@ -30,16 +31,16 @@ class NoteCard extends StatelessWidget {
       hint: 'Long-press for pin or delete',
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: HomeColors.card,
           borderRadius: radius,
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(color: NoteColors.cardShadow, blurRadius: 18, offset: Offset(0, 6)),
           ],
         ),
         child: ClipRRect(
           borderRadius: radius,
           child: Material(
-            color: Colors.white,
+            color: HomeColors.card,
             child: InkWell(
               onTap: onTap,
               onLongPress: onLongPress,

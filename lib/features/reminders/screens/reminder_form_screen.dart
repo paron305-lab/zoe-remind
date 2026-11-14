@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
@@ -160,7 +161,8 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
         colorScheme: Theme.of(ctx).colorScheme.copyWith(
               primary: HomeColors.lavender,
               onPrimary: Colors.white,
-              surface: Colors.white,
+              surface: HomeColors.card,
+              onSurface: HomeColors.ink,
             ),
       );
 
@@ -212,7 +214,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
     if (_locked) return;
     final picked = await showModalBottomSheet<ReminderRepeat>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: HomeColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -227,7 +229,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
                   contentPadding: const EdgeInsets.symmetric(horizontal: 28),
                   title: Text(_repeatLabel(r), style: ReminderText.field),
                   trailing: r == _repeat
-                      ? const Icon(Icons.check_rounded, color: HomeColors.lavender)
+                      ? Icon(Icons.check_rounded, color: HomeColors.lavender)
                       : null,
                   onTap: () => Navigator.pop(ctx, r),
                 ),
@@ -387,7 +389,8 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+      value: (ZoeTheme.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(statusBarColor: Colors.transparent),
       child: Scaffold(
         backgroundColor: HomeColors.cream,
         body: SafeArea(
@@ -413,7 +416,7 @@ class _ReminderFormScreenState extends State<ReminderFormScreen> {
               ),
               Expanded(
                 child: _loading
-                    ? const Center(
+                    ? Center(
                         child: CircularProgressIndicator(color: HomeColors.lavender))
                     : _form(),
               ),
@@ -533,7 +536,7 @@ class _TitleField extends StatelessWidget {
         hintStyle: ReminderText.fieldHint,
         counterText: '', // hide "0/100"
         filled: true,
-        fillColor: const Color(0xFFF6F4FD),
+        fillColor: HomeColors.fieldFill,
         contentPadding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
         enabledBorder: border(const Color(0xFFB7ACEB), 1.5),
         focusedBorder: border(HomeColors.lavender, 2),

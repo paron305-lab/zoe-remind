@@ -35,7 +35,7 @@ class _ScrollCardState extends State<ScrollCard> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       constraints: BoxConstraints(maxHeight: widget.rowHeight * widget.visibleRows),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: HomeColors.card,
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
@@ -60,7 +60,7 @@ class _ScrollCardState extends State<ScrollCard> {
             itemCount: widget.itemCount,
             itemBuilder: widget.itemBuilder,
             separatorBuilder: (_, __) =>
-                const Divider(height: 1, thickness: 1, color: HomeColors.divider),
+                Divider(height: 1, thickness: 1, color: HomeColors.divider),
           ),
         ),
       ),

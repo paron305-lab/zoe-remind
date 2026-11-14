@@ -60,9 +60,9 @@ class ConfirmCard extends StatelessWidget {
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: ChatColors.surface,
           borderRadius: BorderRadius.circular(24),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(color: ChatColors.shadow, blurRadius: 18, offset: Offset(0, 6)),
           ],
         ),
@@ -168,7 +168,7 @@ class ConfirmCard extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8F7FC),
+            color: ChatColors.detailFill,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Text(d.content, maxLines: 4, overflow: TextOverflow.ellipsis, style: ChatText.cardMeta),

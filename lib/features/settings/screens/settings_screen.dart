@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/app/app_config.dart';
@@ -45,14 +46,14 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   int _chatCount = 0;
   int _memoryCount = 0;
   bool _longTermMemory = true;
-  bool _darkMode = false;
   bool _developer = false;
 
   /// 7 taps sa app version → lalabas ang Developer.
   int _versionTaps = 0;
   static const _tapsToUnlock = 7;
 
-  SettingsPalette get _p => SettingsPalette(_darkMode);
+  SettingsPalette get _p => SettingsPalette(ZoeTheme.isDark);
+  bool get _darkMode => ZoeTheme.isDark;
 
   @override
   void initState() {
@@ -101,7 +102,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         _settings.getLanguage(),
         _settings.getModelInfo(),
         _settings.isLongTermMemoryOn(),
-        _settings.isDarkMode(),
         _settings.isDeveloperUnlocked(),
       ]);
       if (!mounted) return;
@@ -110,8 +110,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         _language = results[1] as ZoeLanguage;
         _model = results[2] as ModelInfo;
         _longTermMemory = results[3] as bool;
-        _darkMode = results[4] as bool;
-        _developer = results[5] as bool;
+        _developer = results[4] as bool;
         _loading = false;
       });
     } catch (e) {
@@ -289,8 +288,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   // ───────────────────────── Appearance ─────────────────────────
 
   Future<void> _setDarkMode(bool on) async {
-    setState(() => _darkMode = on);
-    await _save(() => _settings.setDarkMode(on));
+    // Buong app ang lilipat (ZoeApp ang nagre-rebuild).
+    await _save(() => ZoeTheme.setDark(on));
   }
 
   // ───────────────────────── About / Developer ─────────────────────────

@@ -34,8 +34,8 @@ class ChatHeader extends StatelessWidget {
 
     return Container(
       padding: EdgeInsets.fromLTRB(20, top + 12, 8, 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: ChatColors.surface,
         border: Border(bottom: BorderSide(color: HomeColors.divider)),
       ),
       child: Row(
@@ -52,7 +52,7 @@ class ChatHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Zoe', style: ChatText.name),
+                Text('Zoe', style: ChatText.name),
                 const SizedBox(height: 2),
                 Row(
                   children: [
@@ -81,12 +81,12 @@ class ChatHeader extends StatelessWidget {
           IconButton(
             tooltip: 'Chat language',
             onPressed: onLanguageTap,
-            icon: const Icon(Icons.language_rounded, color: HomeColors.inkSoft, size: 28),
+            icon: Icon(Icons.language_rounded, color: HomeColors.inkSoft, size: 28),
           ),
           PopupMenuButton<ChatMenuAction>(
             tooltip: 'More',
-            icon: const Icon(Icons.more_horiz_rounded, color: HomeColors.inkSoft, size: 28),
-            color: Colors.white,
+            icon: Icon(Icons.more_horiz_rounded, color: HomeColors.inkSoft, size: 28),
+            color: ChatColors.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             onSelected: onMenu,
             itemBuilder: (_) => const [

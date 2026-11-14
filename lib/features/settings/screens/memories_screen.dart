@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/memory_item.dart';
 import 'package:zoe_remind/database/repositories/memory_repository.dart';
@@ -19,7 +20,7 @@ class MemoriesScreen extends StatefulWidget {
 
 class _MemoriesScreenState extends State<MemoriesScreen> {
   final _repo = MemoryRepository();
-  SettingsPalette _p = const SettingsPalette(false);
+  SettingsPalette get _p => SettingsPalette(ZoeTheme.isDark);
   List<MemoryItem> _items = const [];
   bool _longTerm = true;
   bool _loading = true;
@@ -40,12 +41,10 @@ class _MemoriesScreenState extends State<MemoriesScreen> {
   Future<void> _load() async {
     try {
       final settings = SettingsRepository();
-      final dark = await settings.isDarkMode();
       final longTerm = await settings.isLongTermMemoryOn();
       final items = await _repo.getAll();
       if (!mounted) return;
       setState(() {
-        _p = SettingsPalette(dark);
         _longTerm = longTerm;
         _items = items;
         _loading = false;

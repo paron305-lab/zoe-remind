@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
@@ -176,7 +177,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         if (!didPop) _back(); // Android back gesture habang may binago
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+        value: (ZoeTheme.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(statusBarColor: Colors.transparent),
         child: Scaffold(
           backgroundColor: HomeColors.cream,
           body: SafeArea(
@@ -195,7 +197,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       _SquareButton(
                         icon: _pinned ? Icons.star_rounded : Icons.star_border_rounded,
                         color: NoteColors.amber,
-                        background: const Color(0xFFFDF1DE),
+                        background: HomeColors.amberLight,
                         tooltip: _pinned ? 'Unpin' : 'Pin to top',
                         onTap: _loading ? null : () => setState(() => _pinned = !_pinned),
                       ),
@@ -214,7 +216,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 ),
                 Expanded(
                   child: _loading
-                      ? const Center(
+                      ? Center(
                           child: CircularProgressIndicator(color: HomeColors.lavender))
                       : _body(meta),
                 ),
@@ -259,7 +261,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFFDF1DE), borderRadius: BorderRadius.circular(14)),
+                      color: HomeColors.amberLight, borderRadius: BorderRadius.circular(14)),
                   child: Text('PINNED',
                       style: NoteText.pill.copyWith(color: const Color(0xFFD48A1E))),
                 ),
@@ -287,7 +289,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
             Text(meta, style: NoteText.meta.copyWith(height: 1.5)),
           ],
           const SizedBox(height: 16),
-          const Divider(color: HomeColors.divider, height: 1),
+          Divider(color: HomeColors.divider, height: 1),
           const SizedBox(height: 16),
           TextField(
             controller: _content,

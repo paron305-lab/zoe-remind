@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/chat_message.dart';
 import 'package:zoe_remind/database/repositories/chat_history_repository.dart';
-import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_dialogs.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_styles.dart';
 
@@ -19,7 +19,7 @@ class ChatHistoryScreen extends StatefulWidget {
 
 class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   final _repo = ChatHistoryRepository();
-  SettingsPalette _p = const SettingsPalette(false);
+  SettingsPalette get _p => SettingsPalette(ZoeTheme.isDark);
   List<ChatConversation> _items = const [];
   bool _loading = true;
 
@@ -38,11 +38,9 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
 
   Future<void> _load() async {
     try {
-      final dark = await SettingsRepository().isDarkMode();
       final items = await _repo.conversations();
       if (!mounted) return;
       setState(() {
-        _p = SettingsPalette(dark);
         _items = items;
         _loading = false;
       });
@@ -140,7 +138,7 @@ class ChatConversationScreen extends StatefulWidget {
 }
 
 class _ChatConversationScreenState extends State<ChatConversationScreen> {
-  SettingsPalette _p = const SettingsPalette(false);
+  SettingsPalette get _p => SettingsPalette(ZoeTheme.isDark);
   List<ChatMessage> _messages = const [];
   bool _loading = true;
 
@@ -152,11 +150,9 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
   Future<void> _load() async {
     try {
-      final dark = await SettingsRepository().isDarkMode();
       final msgs = await ChatHistoryRepository().messages(widget.conversationId);
       if (!mounted) return;
       setState(() {
-        _p = SettingsPalette(dark);
         _messages = msgs;
         _loading = false;
       });

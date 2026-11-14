@@ -18,8 +18,8 @@ class ZoeBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: HomeColors.card,
         border: Border(top: BorderSide(color: HomeColors.divider)),
       ),
       child: SafeArea(

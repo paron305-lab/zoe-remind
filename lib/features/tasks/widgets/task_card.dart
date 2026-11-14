@@ -46,7 +46,7 @@ class TaskCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: HomeColors.card,
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
@@ -178,7 +178,7 @@ class _Checkbox extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: done ? HomeColors.mint : Colors.white,
+                color: done ? HomeColors.mint : HomeColors.card,
                 borderRadius: BorderRadius.circular(13),
                 border: Border.all(
                   color: done ? HomeColors.mint : HomeColors.checkboxBorder,

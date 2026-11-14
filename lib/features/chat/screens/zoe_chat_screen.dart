@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
@@ -121,7 +122,8 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
             colorScheme: Theme.of(ctx).colorScheme.copyWith(
                   primary: HomeColors.lavender,
                   onPrimary: Colors.white,
-                  surface: Colors.white,
+                  surface: HomeColors.card,
+                  onSurface: HomeColors.ink,
                 ),
           ),
           child: child!,
@@ -134,7 +136,7 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
   Future<void> _pickLanguage() async {
     final picked = await showModalBottomSheet<ZoeLanguage>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: HomeColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -145,11 +147,11 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(20, 0, 20, 4),
                 child: Text('Zoe Chat language', style: ChatText.title),
               ),
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
                 child: Text('Naiintindihan pa rin ni Zoe ang English, Tagalog, at Taglish.',
                     style: ChatText.footnote),
@@ -160,7 +162,7 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
                   title: Text(l.label, style: ChatText.cardTitle),
                   subtitle: Text(l.description, style: ChatText.footnote),
                   trailing: l == _chat.language
-                      ? const Icon(Icons.check_rounded, color: HomeColors.lavender)
+                      ? Icon(Icons.check_rounded, color: HomeColors.lavender)
                       : null,
                   onTap: () => Navigator.pop(ctx, l),
                 ),
@@ -196,9 +198,10 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
     final chat = _chat;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+      value: (ZoeTheme.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(statusBarColor: Colors.transparent),
       child: Container(
-        decoration: const BoxDecoration(gradient: ChatColors.background),
+        decoration: BoxDecoration(gradient: ChatColors.background),
         child: Column(
           children: [
             ChatHeader(
@@ -207,7 +210,7 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
               onMenu: _menu,
             ),
             if (chat.status == ZoeChatStatus.downloading)
-              const ChatBanner(
+              ChatBanner(
                 icon: Icons.downloading_rounded,
                 text: "Downloading Zoe's brain… pwede mo pa ring gamitin ang app.",
                 color: HomeColors.sky,
@@ -249,7 +252,7 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
   Widget _body() {
     final chat = _chat;
     if (chat.loading) {
-      return const Center(child: CircularProgressIndicator(color: HomeColors.lavender));
+      return Center(child: CircularProgressIndicator(color: HomeColors.lavender));
     }
     if (!chat.canChat) {
       return ChatNoBrain(onGetReady: () => context.go('/settings'));
@@ -347,7 +350,7 @@ class _NoteDraftSheetState extends State<_NoteDraftSheet> {
       hintStyle: ReminderText.fieldHint,
       counterText: '',
       filled: true,
-      fillColor: const Color(0xFFF6F4FD),
+      fillColor: HomeColors.fieldFill,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       enabledBorder: b(const Color(0xFFB7ACEB), 1.5),
       focusedBorder: b(HomeColors.lavender, 2),
@@ -367,7 +370,7 @@ class _NoteDraftSheetState extends State<_NoteDraftSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Edit note', style: ReminderText.screenTitle),
+            Text('Edit note', style: ReminderText.screenTitle),
             const FieldLabel('Title (optional)'),
             TextField(
               controller: _title,

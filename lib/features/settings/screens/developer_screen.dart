@@ -1,5 +1,6 @@
 import 'package:alarm/alarm.dart';
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
@@ -19,8 +20,8 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
   static const _lavender = Color(0xFF8B7FE0);
   static const _mint = Color(0xFF3FBE93);
   static const _coral = Color(0xFFF0768E);
-  static const _ink = Color(0xFF2B2A3D);
-  static const _cream = Color(0xFFFBF6EF);
+  static Color get _ink => HomeColors.ink;
+  static Color get _cream => HomeColors.cream;
 
   SetupStatus? _setup;
   List<AlarmSettings> _alarms = const [];
@@ -93,7 +94,7 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
       appBar: AppBar(
         backgroundColor: _cream,
         surfaceTintColor: Colors.transparent,
-        title: const Text('Developer',
+        title: Text('Developer',
             style: TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.w700, color: _ink)),
         actions: [
           TextButton(
@@ -110,13 +111,13 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              const Text(
+              Text(
                 'Alarm Check',
                 style: TextStyle(
                     fontFamily: 'Poppins', fontSize: 26, fontWeight: FontWeight.w700, color: _ink),
               ),
-              const Text('Para ma-test ang reminders sa phone na ito.',
-                  style: TextStyle(fontFamily: 'Poppins', color: Colors.black54)),
+              Text('Para ma-test ang reminders sa phone na ito.',
+                  style: TextStyle(fontFamily: 'Poppins', color: HomeColors.inkSoft)),
               const SizedBox(height: 20),
 
               _section('1. Reminder Setup (permissions)'),
@@ -182,7 +183,7 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
   Widget _section(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(text,
-            style: const TextStyle(
+            style: TextStyle(
                 fontFamily: 'Poppins', fontSize: 16, fontWeight: FontWeight.w700, color: _ink)),
       );
 

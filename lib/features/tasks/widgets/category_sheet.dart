@@ -13,7 +13,7 @@ Future<TaskCategory?> showCategorySheet(BuildContext context, {TaskCategory? exi
   return showModalBottomSheet<TaskCategory>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.white,
+    backgroundColor: HomeColors.card,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -27,7 +27,7 @@ enum CategoryAction { edit, delete }
 Future<CategoryAction?> showCategoryActions(BuildContext context, TaskCategory category) {
   return showModalBottomSheet<CategoryAction>(
     context: context,
-    backgroundColor: Colors.white,
+    backgroundColor: HomeColors.card,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -44,7 +44,7 @@ Future<CategoryAction?> showCategoryActions(BuildContext context, TaskCategory c
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(category.label,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontFamily: _f,
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -54,11 +54,11 @@ Future<CategoryAction?> showCategoryActions(BuildContext context, TaskCategory c
             ),
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.edit_rounded, color: HomeColors.lavender),
-              title: const Text('Edit',
+              leading: Icon(Icons.edit_rounded, color: HomeColors.lavender),
+              title: Text('Edit',
                   style: TextStyle(
                       fontFamily: _f, fontWeight: FontWeight.w600, color: HomeColors.ink)),
-              subtitle: const Text('Palitan ang pangalan o kulay',
+              subtitle: Text('Palitan ang pangalan o kulay',
                   style: TextStyle(fontFamily: _f, color: HomeColors.inkSoft)),
               onTap: () => Navigator.pop(ctx, CategoryAction.edit),
             ),
@@ -87,18 +87,18 @@ Future<bool> confirmDeleteCategory(BuildContext context, String label, int taskC
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: HomeColors.card,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       title: Text('Delete "$label"?',
-          style: const TextStyle(
+          style: TextStyle(
               fontFamily: _f, fontWeight: FontWeight.w700, color: HomeColors.ink)),
       content: Text(affected,
-          style: const TextStyle(
+          style: TextStyle(
               fontFamily: _f, fontSize: 15, color: HomeColors.inkSoft, height: 1.4)),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Cancel',
+          child: Text('Cancel',
               style: TextStyle(
                   fontFamily: _f, fontWeight: FontWeight.w700, color: HomeColors.inkSoft)),
         ),
@@ -175,7 +175,7 @@ class _CategorySheetState extends State<_CategorySheet> {
     final preview = _name.text.trim().isEmpty ? 'Category' : _name.text.trim();
     final border = OutlineInputBorder(
       borderRadius: BorderRadius.circular(20),
-      borderSide: const BorderSide(color: HomeColors.divider, width: 1.5),
+      borderSide: BorderSide(color: HomeColors.divider, width: 1.5),
     );
 
     return Padding(
@@ -200,7 +200,7 @@ class _CategorySheetState extends State<_CategorySheet> {
               ),
               const SizedBox(height: 18),
               Text(_isEdit ? 'Edit category' : 'New category',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontFamily: _f,
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
@@ -220,11 +220,11 @@ class _CategorySheetState extends State<_CategorySheet> {
                   errorText: _error,
                   errorStyle: const TextStyle(fontFamily: _f, color: HomeColors.coral),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: HomeColors.card,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   enabledBorder: border,
                   focusedBorder: border.copyWith(
-                      borderSide: const BorderSide(color: HomeColors.lavender, width: 2)),
+                      borderSide: BorderSide(color: HomeColors.lavender, width: 2)),
                   errorBorder: border.copyWith(
                       borderSide: const BorderSide(color: HomeColors.coral, width: 1.5)),
                   focusedErrorBorder: border.copyWith(
@@ -285,7 +285,7 @@ class _Swatch extends StatelessWidget {
             color: color,
             shape: BoxShape.circle,
             border: Border.all(
-              color: selected ? HomeColors.ink : Colors.white,
+              color: selected ? HomeColors.ink : HomeColors.card,
               width: 3,
             ),
             boxShadow: [
@@ -338,7 +338,7 @@ class CategoryChipView extends StatelessWidget {
     return Opacity(
       opacity: enabled || selected ? 1 : 0.5,
       child: Material(
-        color: selected ? color.withValues(alpha: 0.16) : Colors.white,
+        color: selected ? color.withValues(alpha: 0.16) : HomeColors.card,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(color: selected ? color : HomeColors.divider, width: 1.5),
@@ -383,7 +383,7 @@ class AddCategoryChip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.add_rounded, size: 18, color: HomeColors.lavender),
+              Icon(Icons.add_rounded, size: 18, color: HomeColors.lavender),
               const SizedBox(width: 6),
               Text('Add',
                   style: ReminderText.chip.copyWith(color: HomeColors.lavender, fontSize: 14)),

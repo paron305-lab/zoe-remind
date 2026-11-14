@@ -65,9 +65,9 @@ class ChatNoBrain extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
-            const Text('Zoe is still asleep', textAlign: TextAlign.center, style: ChatText.title),
+            Text('Zoe is still asleep', textAlign: TextAlign.center, style: ChatText.title),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               "Kailangan ko muna ng brain ko para makausap mo ako. "
               "One-time download lang, tapos gagana na ako kahit offline. "
               "Pwede mo pa ring gamitin ang Home, Tasks, at Notes.",
@@ -138,7 +138,7 @@ class ChatBanner extends StatelessWidget {
                 child: LinearProgressIndicator(
                   minHeight: 6,
                   color: color,
-                  backgroundColor: Colors.white,
+                  backgroundColor: ChatColors.surface,
                 ),
               ),
             ),
@@ -166,8 +166,8 @@ class SuggestionRow extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (context, i) => ActionChip(
           label: Text(items[i], style: ChatText.chip),
-          backgroundColor: Colors.white,
-          side: const BorderSide(color: Color(0xFFD9D3F5), width: 1.5),
+          backgroundColor: ChatColors.surface,
+          side: BorderSide(color: ChatColors.chipBorder, width: 1.5),
           shape: const StadiumBorder(),
           onPressed: () => onTap(items[i]),
         ),

@@ -28,7 +28,7 @@ class NotesHeader extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Expanded(child: Text('Notes', style: NoteText.screenTitle)),
+              Expanded(child: Text('Notes', style: NoteText.screenTitle)),
               Material(
                 color: Colors.white.withValues(alpha: 0.22),
                 borderRadius: BorderRadius.circular(20),
@@ -57,7 +57,7 @@ class NotesHeader extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: 'Search your notes…',
                 hintStyle: NoteText.searchHint,
-                prefixIcon: const Padding(
+                prefixIcon: Padding(
                   padding: EdgeInsets.only(left: 18, right: 8),
                   child: Icon(Icons.search_rounded, color: HomeColors.inkSoft, size: 26),
                 ),
@@ -66,7 +66,7 @@ class NotesHeader extends StatelessWidget {
                     ? null
                     : IconButton(
                         tooltip: 'Clear search',
-                        icon: const Icon(Icons.close_rounded, color: HomeColors.inkSoft),
+                        icon: Icon(Icons.close_rounded, color: HomeColors.inkSoft),
                         onPressed: search.clear,
                       ),
                 filled: true,
@@ -113,7 +113,7 @@ class NoteFilterChips extends StatelessWidget {
                     child: Text(
                       f.label,
                       style: NoteText.chip.copyWith(
-                        color: f == selected ? Colors.white : const Color(0xFF5E5A85),
+                        color: f == selected ? Colors.white : HomeColors.inkSoft,
                       ),
                     ),
                   ),

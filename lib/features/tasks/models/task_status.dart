@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/database/models/task.dart';
 
@@ -42,12 +43,12 @@ extension TaskStatusX on TaskStatus {
   Color get color => switch (this) {
         TaskStatus.history => const Color(0xFF3FBE93), // mint
         TaskStatus.missed => const Color(0xFFF0768E), // coral
-        _ => const Color(0xFF6E5BD6),
+        _ => HomeColors.lavender,
       };
 
   Color get background => switch (this) {
-        TaskStatus.history => const Color(0xFFE4F7EF),
-        TaskStatus.missed => const Color(0xFFFCE6EC),
-        _ => const Color(0xFFEDEAFB),
+        TaskStatus.history => HomeColors.mintLight,
+        TaskStatus.missed => HomeColors.coralLight,
+        _ => HomeColors.lavenderLight,
       };
 }
