@@ -16,6 +16,10 @@ dependencies:
   alarm: ^5.10.0
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.18.3
+  dio: ^5.11.1
+  path_provider: ^2.1.6
+  crypto: ^3.0.8
+  connectivity_plus: ^7.3.2
 
 dev_dependencies:
   flutter_test:

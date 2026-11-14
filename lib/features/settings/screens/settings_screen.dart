@@ -1,8 +1,10 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:zoe_remind/ai/model_manager/model_downloader.dart';
 import 'package:zoe_remind/app/app_config.dart';
+import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/model_info.dart';
@@ -35,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   final _chats = ChatHistoryRepository();
   final _memories = MemoryRepository();
   final _alarms = ReminderAlarmService.instance;
+  final _downloader = ModelDownloader.instance;
 
   bool _loading = true;
   bool _busy = false;
@@ -66,6 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     _alarms.sound.addListener(_rebuild);
     _alarms.vibrate.addListener(_rebuild);
     _alarms.defaultSnooze.addListener(_rebuild);
+    _downloader.progress.addListener(_onDownloadProgress);
     _load();
   }
 
@@ -78,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     _alarms.sound.removeListener(_rebuild);
     _alarms.vibrate.removeListener(_rebuild);
     _alarms.defaultSnooze.removeListener(_rebuild);
+    _downloader.progress.removeListener(_onDownloadProgress);
     super.dispose();
   }
 
@@ -181,24 +186,112 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   // ───────────────────────── Zoe's Brain ─────────────────────────
 
+  /// Bawat update ng ModelDownloader: i-refresh ang card; snackbar sa dulo.
+  void _onDownloadProgress() {
+    if (!mounted) return;
+    final pr = _downloader.progress.value;
+    setState(() {});
+    switch (pr.phase) {
+      case DownloadPhase.done:
+        _loadModel();
+        ZoeSnack.show(context, "Zoe's brain is ready 🧠✨");
+      case DownloadPhase.failed:
+        _loadModel();
+        ZoeSnack.show(context, pr.message ?? 'Download failed', error: true);
+      case DownloadPhase.cancelled:
+        _loadModel();
+        ZoeSnack.show(context, 'Download paused — tap Resume anytime');
+      default:
+        break;
+    }
+  }
+
+  /// wifi / mobile / none (ethernet at VPN = wifi para sa decision na ito).
+  Future<String> _network() async {
+    try {
+      final r = await Connectivity().checkConnectivity();
+      if (r.contains(ConnectivityResult.wifi) ||
+          r.contains(ConnectivityResult.ethernet) ||
+          r.contains(ConnectivityResult.vpn)) {
+        return 'wifi';
+      }
+      if (r.contains(ConnectivityResult.mobile)) return 'mobile';
+      return 'none';
+    } catch (_) {
+      return 'wifi'; // hindi ma-check → ituloy, may confirm dialog pa rin
+    }
+  }
+
+  /// [Download] / [Resume]: kunin ang config sa Supabase → confirm → start.
   Future<void> _downloadModel() async {
+    if (_downloader.isRunning) return;
     setState(() => _busy = true);
-    await _save(() => _settings.setModelStatus(ModelStatus.pending),
-        ok: "Okay! Zoe will get her brain ready 🧠");
-    await _loadModel();
-    if (mounted) setState(() => _busy = false);
+    try {
+      final net = await _network();
+      if (net == 'none') {
+        if (mounted) ZoeSnack.show(context, 'No internet. Connect to Wi-Fi first.', error: true);
+        return;
+      }
+      final config = await _downloader.latestConfig();
+      if (!mounted) return;
+      if (config == null) {
+        ZoeSnack.show(context, "Couldn't reach Zoe's server. Try again later.", error: true);
+        return;
+      }
+      final size = BrainCard.formatBytes(config.sizeBytes);
+      final ok = await confirmAction(
+        context,
+        palette: _p,
+        danger: false,
+        title: _model.isDownloading ? 'Resume download?' : "Download Zoe's brain?",
+        message: net == 'mobile'
+            ? 'Naka-mobile data ka. $size ang model na ito — mas mainam sa Wi-Fi. '
+                'Ituloy pa rin?'
+            : '$size ang model (v${config.version}). Isang beses lang ito. '
+                'Huwag isara si Zoe hanggang matapos.',
+        confirmLabel: _model.isDownloading ? 'Resume' : 'Download',
+      );
+      if (!ok || !mounted) return;
+      _downloader.start(); // hindi ina-await — live update sa card
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  Future<void> _cancelDownload() async {
-    setState(() => _busy = true);
-    await _save(() => _settings.setModelStatus(ModelStatus.skipped), ok: 'Download cancelled');
-    await _loadModel();
-    if (mounted) setState(() => _busy = false);
-  }
+  void _cancelDownload() => _downloader.cancel();
 
-  void _updateModel() {
-    // Wala pang manifest.json (Supabase) na ikukumpara — up to date ang naka-install.
-    ZoeSnack.show(context, "Zoe's brain is up to date (v${_model.version ?? '—'})");
+  /// [Update]: ikumpara ang naka-install sa active model sa Supabase.
+  Future<void> _updateModel() async {
+    if (_downloader.isRunning) return;
+    setState(() => _busy = true);
+    try {
+      final config = await _downloader.latestConfig();
+      if (!mounted) return;
+      if (config == null) {
+        ZoeSnack.show(context, "Couldn't check for updates. Try again later.", error: true);
+        return;
+      }
+      if (config.version == _model.version) {
+        ZoeSnack.show(context, "Zoe's brain is up to date (v${config.version})");
+        return;
+      }
+      final ok = await confirmAction(
+        context,
+        palette: _p,
+        danger: false,
+        title: 'Update to v${config.version}?',
+        message: 'Ida-download ang bagong model (${BrainCard.formatBytes(config.sizeBytes)}) '
+            'at papalitan ang luma. Mas mainam sa Wi-Fi.',
+        confirmLabel: 'Update',
+      );
+      if (!ok || !mounted) return;
+      await _settings.deleteModel();
+      await _downloader.clearPartials();
+      await _loadModel();
+      _downloader.start();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _deleteModel() async {
@@ -215,6 +308,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     var freed = 0;
     await _save(() async {
       freed = await _settings.deleteModel();
+      await _downloader.clearPartials();
     });
     await _loadModel();
     if (!mounted) return;
@@ -394,6 +488,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                       SettingsSection("Zoe's brain", palette: p),
                       BrainCard(
                         info: _model,
+                        progress: _downloader.progress.value,
                         palette: p,
                         busy: _busy,
                         onDownload: _downloadModel,

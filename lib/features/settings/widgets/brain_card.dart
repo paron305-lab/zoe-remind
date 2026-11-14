@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/ai/model_manager/model_downloader.dart';
 import 'package:zoe_remind/core/constants/ai_constants.dart';
 import 'package:zoe_remind/database/models/model_info.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_styles.dart';
 
 /// Settings › Zoe's Brain: status · version · size + [Download] [Update] [Delete].
-/// Binabasa ang model_state. Ang totoong download (Supabase) ay idadagdag
-/// sa model downloader — dito naka-queue lang ito bilang "pending".
+/// Binabasa ang model_state (SQLite) at ang live progress ng [ModelDownloader].
 class BrainCard extends StatelessWidget {
   final ModelInfo info;
+
+  /// Live progress mula sa ModelDownloader.instance.progress.
+  final DownloadProgress progress;
   final SettingsPalette palette;
   final bool busy;
   final VoidCallback onDownload;
@@ -19,6 +22,7 @@ class BrainCard extends StatelessWidget {
   const BrainCard({
     super.key,
     required this.info,
+    required this.progress,
     required this.palette,
     required this.busy,
     required this.onDownload,
@@ -27,13 +31,27 @@ class BrainCard extends StatelessWidget {
     required this.onDelete,
   });
 
-  (String, Color) _status() => switch (info.status) {
-        ModelStatus.ready => ('Ready', palette.mint),
-        ModelStatus.downloading => ('Downloading…', palette.accent),
-        ModelStatus.pending => ('Waiting to download', palette.amber),
-        ModelStatus.failed => ('Download failed', palette.coral),
-        ModelStatus.skipped || null => ('Not downloaded', palette.inkSoft),
+  bool get _running => progress.isActive;
+
+  /// Na-kill ang app habang nagda-download → may .part na pwedeng ituloy.
+  bool get _paused => info.isDownloading && !_running;
+
+  (String, Color) _status() {
+    if (_running) {
+      return switch (progress.phase) {
+        DownloadPhase.fetchingConfig => ('Connecting…', palette.accent),
+        DownloadPhase.verifying => ('Checking file…', palette.accent),
+        _ => ('Downloading… ${progress.percent}%', palette.accent),
       };
+    }
+    return switch (info.status) {
+      ModelStatus.ready => ('Ready', palette.mint),
+      ModelStatus.downloading => ('Paused — tap Resume', palette.amber),
+      ModelStatus.pending => ('Waiting to download', palette.amber),
+      ModelStatus.failed => ('Download failed', palette.coral),
+      ModelStatus.skipped || null => ('Not downloaded', palette.inkSoft),
+    };
+  }
 
   static String formatBytes(int bytes) {
     if (bytes >= 1024 * 1024 * 1024) {
@@ -43,6 +61,9 @@ class BrainCard extends StatelessWidget {
   }
 
   String get _size {
+    if (_running && progress.total > 0) {
+      return '${formatBytes(progress.received)} / ${formatBytes(progress.total)}';
+    }
     final b = info.sizeBytes;
     if (b != null && b > 0) return formatBytes(b);
     return '~${AiConstants.estimatedSizeMb} MB download';
@@ -51,13 +72,17 @@ class BrainCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = _status();
-    final explain = switch (info.status) {
-      ModelStatus.ready => 'Zoe thinks on your phone — no internet needed.',
-      ModelStatus.pending || ModelStatus.downloading =>
-        'Zoe will get her brain when you are online. The rest of the app works as usual.',
-      ModelStatus.failed => 'Something went wrong. Try downloading again.',
-      _ => 'Download once so Zoe can chat and understand you, even offline.',
-    };
+    final explain = _running
+        ? 'Keep Zoe open until this finishes. The rest of the app works as usual.'
+        : switch (info.status) {
+            ModelStatus.ready => 'Zoe thinks on your phone — no internet needed.',
+            ModelStatus.downloading =>
+              'Download was interrupted. Tap Resume to continue where it stopped.',
+            ModelStatus.pending =>
+              'Tap Download when you are on Wi-Fi. The rest of the app works as usual.',
+            ModelStatus.failed => 'Something went wrong. Try downloading again.',
+            _ => 'Download once so Zoe can chat and understand you, even offline.',
+          };
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -114,12 +139,14 @@ class BrainCard extends StatelessWidget {
             _InfoRow('Size', _size, palette),
             const SizedBox(height: 10),
             Text(explain, style: SettingsText.body(palette)),
-            if (info.isDownloading) ...[
+            if (_running || _paused) ...[
               const SizedBox(height: 14),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: LinearProgressIndicator(
                   minHeight: 8,
+                  // null = gumagalaw lang (connecting / verifying)
+                  value: _running ? progress.fraction : 0,
                   color: palette.accent,
                   backgroundColor: palette.pillBg,
                 ),
@@ -134,20 +161,28 @@ class BrainCard extends StatelessWidget {
   }
 
   List<Widget> _buttons() {
-    final primary = switch (info.status) {
-      ModelStatus.ready => _Btn('Update', Icons.system_update_alt_rounded, onUpdate, palette,
-          filled: true, enabled: !busy),
-      ModelStatus.pending || ModelStatus.downloading =>
-        _Btn('Cancel', Icons.close_rounded, onCancel, palette, filled: false, enabled: !busy),
-      _ => _Btn('Download', Icons.download_rounded, onDownload, palette,
-          filled: true, enabled: !busy),
-    };
+    final Widget primary;
+    if (_running) {
+      primary = _Btn('Cancel', Icons.close_rounded, onCancel, palette,
+          filled: false, enabled: !busy);
+    } else if (info.isReady) {
+      primary = _Btn('Update', Icons.system_update_alt_rounded, onUpdate, palette,
+          filled: true, enabled: !busy);
+    } else if (_paused) {
+      primary = _Btn('Resume', Icons.play_arrow_rounded, onDownload, palette,
+          filled: true, enabled: !busy);
+    } else {
+      primary = _Btn('Download', Icons.download_rounded, onDownload, palette,
+          filled: true, enabled: !busy);
+    }
     return [
       Expanded(child: primary),
       const SizedBox(width: 12),
       Expanded(
         child: _Btn('Delete', Icons.delete_outline_rounded, onDelete, palette,
-            filled: false, danger: true, enabled: !busy && info.canDelete),
+            filled: false,
+            danger: true,
+            enabled: !busy && !_running && (info.canDelete || _paused)),
       ),
     ];
   }
