@@ -49,3 +49,6 @@ app.*.map.json
 
 analyze_errors.txt
 run_log.txt
+
+# Supabase keys (secret — huwag i-commit)
+env.json

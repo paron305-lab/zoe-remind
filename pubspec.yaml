@@ -15,6 +15,7 @@ dependencies:
   go_router: ^18.1.2
   alarm: ^5.10.0
   cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.18.3
 
 dev_dependencies:
   flutter_test:
