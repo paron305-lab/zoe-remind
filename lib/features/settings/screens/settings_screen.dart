@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/ai/model_manager/model_downloader.dart';
 import 'package:zoe_remind/app/app_config.dart';
+import 'package:zoe_remind/core/constants/ai_constants.dart';
+import 'package:zoe_remind/core/constants/model_tier.dart';
+import 'package:zoe_remind/core/device/device_memory.dart';
 import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
@@ -19,6 +22,7 @@ import 'package:zoe_remind/features/settings/widgets/profile_card.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_dialogs.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_styles.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_tiles.dart';
+import 'package:zoe_remind/supabase/model_config_service.dart';
 
 /// Settings tab (Screen 09).
 /// Profile · Zoe Chat · Zoe's Brain · Reminders · Privacy & Memory ·
@@ -44,7 +48,19 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   UserProfile? _profile;
   ZoeLanguage _language = ZoeLanguage.both;
-  ModelInfo _model = ModelInfo.none;
+
+  /// Estado ng bawat model sa phone (model_state).
+  Map<ModelTier, ModelInfo> _models = const {};
+
+  /// Info ng bawat model galing sa Supabase. Walang laman kapag offline.
+  Map<ModelTier, ModelConfig> _configs = const {};
+
+  /// Ang piniling model ng user (settings: active_model).
+  ModelTier _activeTier = ModelTier.lite;
+
+  /// RAM ng phone sa MB. null = hindi pa alam / hindi nalaman.
+  int? _ramMb;
+
   SetupStatus? _setup;
   int _chatCount = 0;
   int _memoryCount = 0;
@@ -54,6 +70,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   /// 7 taps sa app version → lalabas ang Developer.
   int _versionTaps = 0;
   static const _tapsToUnlock = 7;
+
+  /// Dagdag na free space na kailangan bukod sa size ng model.
+  static const _storageMarginMb = 300;
 
   SettingsPalette get _p => SettingsPalette(ZoeTheme.isDark);
   bool get _darkMode => ZoeTheme.isDark;
@@ -105,24 +124,26 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       final results = await Future.wait([
         _settings.getProfile(),
         _settings.getLanguage(),
-        _settings.getModelInfo(),
+        _settings.getAllModels(),
         _settings.isLongTermMemoryOn(),
         _settings.isDeveloperUnlocked(),
+        _settings.getActiveTier(),
       ]);
       if (!mounted) return;
       setState(() {
         _profile = results[0] as UserProfile?;
         _language = results[1] as ZoeLanguage;
-        _model = results[2] as ModelInfo;
+        _models = results[2] as Map<ModelTier, ModelInfo>;
         _longTermMemory = results[3] as bool;
         _developer = results[4] as bool;
+        _activeTier = results[5] as ModelTier;
         _loading = false;
       });
     } catch (e) {
       debugPrint('Loading settings failed: $e');
       if (mounted) setState(() => _loading = false);
     }
-    await Future.wait([_loadCounts(), _loadSetup()]);
+    await Future.wait([_loadCounts(), _loadSetup(), _loadBrainExtras()]);
   }
 
   Future<void> _loadCounts() async {
@@ -148,9 +169,34 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     }
   }
 
-  Future<void> _loadModel() async {
-    final m = await _settings.getModelInfo();
-    if (mounted) setState(() => _model = m);
+  /// Estado ng mga model sa phone + alin ang pinili.
+  Future<void> _loadModels() async {
+    final models = await _settings.getAllModels();
+    final active = await _settings.getActiveTier();
+    if (!mounted) return;
+    setState(() {
+      _models = models;
+      _activeTier = active;
+    });
+  }
+
+  /// RAM ng phone + listahan ng models sa Supabase (pangalan, size, min RAM).
+  /// Kapag offline, hindi binubura ang dating nakuha.
+  Future<void> _loadBrainExtras() async {
+    try {
+      final ram = await DeviceMemory.totalRamMb();
+      final configs = await ModelConfigService.fetchAll();
+      debugPrint('[Device] RAM: $ram MB · models sa server: ${configs.length}');
+      if (!mounted) return;
+      setState(() {
+        _ramMb = ram;
+        if (configs.isNotEmpty) {
+          _configs = {for (final c in configs) c.tier: c};
+        }
+      });
+    } catch (e) {
+      debugPrint('Loading brain info failed: $e');
+    }
   }
 
   /// Patakbuhin ang [action]; kapag pumalya, error snackbar.
@@ -186,6 +232,41 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   // ───────────────────────── Zoe's Brain ─────────────────────────
 
+  ModelInfo _info(ModelTier tier) => _models[tier] ?? ModelInfo.empty(tier);
+
+  /// Pangalang pinapakita: galing sa Supabase, o fallback kapag offline.
+  String _name(ModelTier tier) =>
+      _configs[tier]?.displayName ?? AiConstants.fallbackName(tier);
+
+  /// Ang model na talagang gamit ni Zoe: ang pinili kung ready,
+  /// kung hindi ay ang isa pa kung ready. null = walang ready.
+  ModelTier? get _inUse {
+    if (_info(_activeTier).isReady) return _activeTier;
+    final other = _activeTier.other;
+    return _info(other).isReady ? other : null;
+  }
+
+  /// Laging kita ang Zoe Lite. Ang Zoe Plus ay kita lang kapag
+  /// nasa phone na ito, o inaalok ng server sa build na ito.
+  bool _visible(ModelTier tier) {
+    if (tier == ModelTier.lite) return true;
+    final status = _info(tier).status;
+    if (status != null && status != ModelStatus.skipped) return true;
+    final config = _configs[tier];
+    return config != null && config.minAppBuild <= AppConfig.build;
+  }
+
+  /// Hindi null kapag kulang ang RAM ng phone para sa model na ito.
+  /// Hindi nila-lock ang model na ready na sa phone.
+  String? _lockedNote(ModelTier tier) {
+    final config = _configs[tier];
+    final ram = _ramMb;
+    if (config == null || ram == null || config.minRamMb <= 0) return null;
+    if (_info(tier).isReady || ram >= config.minRamMb) return null;
+    final gb = (config.minRamMb / 1024).ceil();
+    return 'Kailangan ng $gb GB RAM pataas';
+  }
+
   /// Bawat update ng ModelDownloader: i-refresh ang card; snackbar sa dulo.
   void _onDownloadProgress() {
     if (!mounted) return;
@@ -193,13 +274,13 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     setState(() {});
     switch (pr.phase) {
       case DownloadPhase.done:
-        _loadModel();
-        ZoeSnack.show(context, "Zoe's brain is ready 🧠✨");
+        _loadModels();
+        ZoeSnack.show(context, '${_name(pr.tier)} is ready 🧠✨');
       case DownloadPhase.failed:
-        _loadModel();
+        _loadModels();
         ZoeSnack.show(context, pr.message ?? 'Download failed', error: true);
       case DownloadPhase.cancelled:
-        _loadModel();
+        _loadModels();
         ZoeSnack.show(context, 'Download paused — tap Resume anytime');
       default:
         break;
@@ -222,9 +303,13 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     }
   }
 
-  /// [Download] / [Resume]: kunin ang config sa Supabase → confirm → start.
-  Future<void> _downloadModel() async {
-    if (_downloader.isRunning) return;
+  /// [Download] / [Resume]: kunin ang config sa Supabase → RAM at storage
+  /// check → confirm → start.
+  Future<void> _downloadModel(ModelTier tier) async {
+    if (_downloader.isRunning) {
+      ZoeSnack.show(context, 'May dina-download pa. Hintayin munang matapos.');
+      return;
+    }
     setState(() => _busy = true);
     try {
       final net = await _network();
@@ -232,27 +317,55 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         if (mounted) ZoeSnack.show(context, 'No internet. Connect to Wi-Fi first.', error: true);
         return;
       }
-      final config = await _downloader.latestConfig();
+      final config = await _downloader.latestConfig(tier);
       if (!mounted) return;
       if (config == null) {
         ZoeSnack.show(context, "Couldn't reach Zoe's server. Try again later.", error: true);
         return;
       }
+
+      // Kaya ba ng phone? (Zoe Plus: 6 GB RAM pataas)
+      if (config.minRamMb > 0) {
+        final ram = _ramMb ?? await DeviceMemory.totalRamMb();
+        if (!mounted) return;
+        if (ram != null && ram < config.minRamMb) {
+          ZoeSnack.show(context, 'Kulang ang RAM ng phone para sa ${config.displayName}.',
+              error: true);
+          return;
+        }
+      }
+
+      // May sapat bang space? (hindi na chine-check kapag Resume)
+      final resuming = _info(tier).isDownloading;
+      if (!resuming) {
+        final free = await DeviceMemory.freeStorageMb();
+        if (!mounted) return;
+        final needMb = config.sizeBytes ~/ (1024 * 1024) + _storageMarginMb;
+        if (free != null && free < needMb) {
+          ZoeSnack.show(
+              context,
+              'Kulang ang storage. Kailangan ng mga '
+              '${BrainCard.formatBytes(needMb * 1024 * 1024)} na free space.',
+              error: true);
+          return;
+        }
+      }
+
       final size = BrainCard.formatBytes(config.sizeBytes);
       final ok = await confirmAction(
         context,
         palette: _p,
         danger: false,
-        title: _model.isDownloading ? 'Resume download?' : "Download Zoe's brain?",
+        title: resuming ? 'Resume download?' : 'Download ${config.displayName}?',
         message: net == 'mobile'
             ? 'Naka-mobile data ka. $size ang model na ito — mas mainam sa Wi-Fi. '
                 'Ituloy pa rin?'
             : '$size ang model (v${config.version}). Isang beses lang ito. '
                 'Huwag isara si Zoe hanggang matapos.',
-        confirmLabel: _model.isDownloading ? 'Resume' : 'Download',
+        confirmLabel: resuming ? 'Resume' : 'Download',
       );
       if (!ok || !mounted) return;
-      _downloader.start(); // hindi ina-await — live update sa card
+      _downloader.start(tier); // hindi ina-await — live update sa card
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -261,18 +374,21 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   void _cancelDownload() => _downloader.cancel();
 
   /// [Update]: ikumpara ang naka-install sa active model sa Supabase.
-  Future<void> _updateModel() async {
-    if (_downloader.isRunning) return;
+  Future<void> _updateModel(ModelTier tier) async {
+    if (_downloader.isRunning) {
+      ZoeSnack.show(context, 'May dina-download pa. Hintayin munang matapos.');
+      return;
+    }
     setState(() => _busy = true);
     try {
-      final config = await _downloader.latestConfig();
+      final config = await _downloader.latestConfig(tier);
       if (!mounted) return;
       if (config == null) {
         ZoeSnack.show(context, "Couldn't check for updates. Try again later.", error: true);
         return;
       }
-      if (config.version == _model.version) {
-        ZoeSnack.show(context, "Zoe's brain is up to date (v${config.version})");
+      if (config.version == _info(tier).version) {
+        ZoeSnack.show(context, '${config.displayName} is up to date (v${config.version})');
         return;
       }
       final ok = await confirmAction(
@@ -285,36 +401,62 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         confirmLabel: 'Update',
       );
       if (!ok || !mounted) return;
-      await _settings.deleteModel();
-      await _downloader.clearPartials();
-      await _loadModel();
-      _downloader.start();
+      // deleteModel() ay lumilipat sa kabilang model kapag ito ang pinili;
+      // ibalik ang pili para ito pa rin ang gamit pagkatapos ng update.
+      final wasChosen = _activeTier == tier;
+      await _settings.deleteModel(tier);
+      if (wasChosen) await _settings.setActiveTier(tier);
+      await _downloader.clearPartials(config.modelName);
+      await _loadModels();
+      _downloader.start(tier);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _deleteModel() async {
+  Future<void> _deleteModel(ModelTier tier) async {
+    final name = _name(tier);
+    final other = tier.other;
+    final otherReady = _info(other).isReady;
+    final String message;
+    if (otherReady) {
+      final switching =
+          _inUse == tier ? 'Lilipat si Zoe sa ${_name(other)}. ' : '';
+      message = 'Matatanggal ang $name sa phone mo. $switching'
+          'Hindi mabubura ang tasks, reminders at notes mo.';
+    } else {
+      message = 'Matatanggal ang AI model sa phone mo. Hindi muna makakapag-chat si Zoe '
+          'hanggang i-download mo ulit. Hindi mabubura ang tasks, reminders at notes mo.';
+    }
     final ok = await confirmAction(
       context,
       palette: _p,
-      title: "Delete Zoe's brain?",
-      message: 'Matatanggal ang AI model sa phone mo. Hindi muna makakapag-chat si Zoe '
-          'hanggang i-download mo ulit. Hindi mabubura ang tasks, reminders at notes mo.',
+      title: 'Delete $name?',
+      message: message,
       confirmLabel: 'Delete',
     );
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     var freed = 0;
+    // .part ng model na ito lang ang buburahin.
+    final fileName = _configs[tier]?.modelName ?? _info(tier).modelName;
     await _save(() async {
-      freed = await _settings.deleteModel();
-      await _downloader.clearPartials();
+      freed = await _settings.deleteModel(tier);
+      await _downloader.clearPartials(fileName);
     });
-    await _loadModel();
+    await _loadModels();
     if (!mounted) return;
     setState(() => _busy = false);
     ZoeSnack.show(context,
-        freed > 0 ? 'Deleted — ${BrainCard.formatBytes(freed)} freed' : "Zoe's brain removed");
+        freed > 0 ? 'Deleted — ${BrainCard.formatBytes(freed)} freed' : '$name removed');
+  }
+
+  /// [Gamitin]: piliin ang model na ito bilang gamit ni Zoe.
+  Future<void> _useModel(ModelTier tier) async {
+    if (!_info(tier).isReady) return;
+    await _save(() => _settings.setActiveTier(tier),
+        ok: 'Si ${_name(tier)} na ang gamit ni Zoe ✨');
+    await _loadModels();
   }
 
   // ───────────────────────── Reminders ─────────────────────────
@@ -437,6 +579,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   Widget build(BuildContext context) {
     final p = _p;
     final remindersOn = _alarms.enabled.value;
+    final inUse = _inUse;
+    final runningTier = _downloader.runningTier;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: (_darkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
@@ -484,18 +628,30 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                         ),
                       ),
 
-                      // 3. Zoe's Brain
+                      // 3. Zoe's Brain — isang card kada model
                       SettingsSection("Zoe's brain", palette: p),
-                      BrainCard(
-                        info: _model,
-                        progress: _downloader.progress.value,
-                        palette: p,
-                        busy: _busy,
-                        onDownload: _downloadModel,
-                        onCancel: _cancelDownload,
-                        onUpdate: _updateModel,
-                        onDelete: _deleteModel,
-                      ),
+                      for (final tier in ModelTier.values)
+                        if (_visible(tier)) ...[
+                          if (tier != ModelTier.lite) const SizedBox(height: 14),
+                          BrainCard(
+                            tier: tier,
+                            title: _name(tier),
+                            description: _configs[tier]?.description,
+                            info: _info(tier),
+                            progress: _downloader.progress.value,
+                            palette: p,
+                            busy: _busy,
+                            active: inUse == tier,
+                            lockedNote: _lockedNote(tier),
+                            otherBusy: runningTier != null && runningTier != tier,
+                            downloadBytes: _configs[tier]?.sizeBytes,
+                            onDownload: () => _downloadModel(tier),
+                            onCancel: _cancelDownload,
+                            onUpdate: () => _updateModel(tier),
+                            onDelete: () => _deleteModel(tier),
+                            onUse: () => _useModel(tier),
+                          ),
+                        ],
 
                       // 4. Reminders
                       SettingsSection('Reminders', palette: p),

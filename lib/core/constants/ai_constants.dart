@@ -1,13 +1,20 @@
-/// Zoe's on-device AI model (Zoe's Brain).
-/// Isang model para sa lahat ng phones (low-end at high-end).
+import 'package:zoe_remind/core/constants/model_tier.dart';
+
+/// Zoe's on-device AI models (Zoe's Brain).
+/// Dalawa: Zoe Lite (lahat ng phone) at Zoe Plus (optional, 6 GB RAM pataas).
+/// Ang totoong pangalan, size at link ay galing sa Supabase (model_config).
+/// Ang mga nandito ay fallback lang kapag offline.
 class AiConstants {
   AiConstants._();
 
-  /// Pangalang pinapakita sa Settings › Zoe's Brain.
-  /// Palitan kapag final na ang pick (Qwen3.5-0.8B o 2B).
+  /// Pangalan ng Lite model file (fallback).
   static const modelName = 'Qwen3.5-0.8B';
 
-  /// Tantiya lang hangga't wala pang manifest.json galing Supabase.
+  /// Tantiyang size ng Zoe Lite kapag hindi pa alam ang totoo.
   /// Kapag na-download na, ang totoong size_bytes sa model_state ang ipapakita.
   static const estimatedSizeMb = 500;
+
+  /// Pangalang ipapakita kapag walang display_name galing sa server.
+  static String fallbackName(ModelTier tier) =>
+      tier == ModelTier.lite ? 'Zoe Lite' : 'Zoe Plus';
 }

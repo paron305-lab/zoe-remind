@@ -1,6 +1,7 @@
 package com.example.zoe_app
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
@@ -8,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.os.StatFs
 import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -39,6 +41,35 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Zoe's Brain: kaya ba ng phone ang Zoe Plus? (RAM + free storage)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zoe/device")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "totalRamMb" -> result.success(totalRamMb())
+                    "freeStorageMb" -> result.success(freeStorageMb())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    // ───────────────────────── Device (RAM / storage) ─────────────────────────
+
+    /** Kabuuang RAM ng phone sa MB. Ang "6 GB" na phone ay mga 5400–5800 dito. */
+    private fun totalRamMb(): Int = try {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        (info.totalMem / (1024L * 1024L)).toInt()
+    } catch (e: Exception) {
+        -1
+    }
+
+    /** Free space sa app storage (kung saan nase-save ang model) sa MB. */
+    private fun freeStorageMb(): Int = try {
+        (StatFs(filesDir.absolutePath).availableBytes / (1024L * 1024L)).toInt()
+    } catch (e: Exception) {
+        -1
     }
 
     // ───────────────────────── Lock screen ─────────────────────────
