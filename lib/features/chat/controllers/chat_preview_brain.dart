@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart' show TimeOfDay;
+import 'package:zoe_remind/ai/parser/intent_classifier.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
@@ -6,31 +7,39 @@ import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 
-/// ⚠️ UI PREVIEW LANG — HINDI ITO SI QWEN.
+/// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
-/// Simpleng keyword matcher para ma-test ang lahat ng UI ng Zoe Chat
-/// (confirmation cards, clarification chips, answer cards, error) kahit
-/// wala pang AI. Papalitan ito ng totoong pipeline:
-///   Input Guard → Qwen → JSON Validator → Allowlist → Safety Engine → code
+///   1. Keywords (code)  → mabilis, gumagana kahit walang model.
+///   2. Walang keyword?  → tinatanong si Qwen kung anong INTENT (label lang).
+///   3. Date, time, title → laging code ang kumukuha (hindi si Qwen).
+///   4. Lahat ng write    → confirmation card; walang nase-save hangga't
+///                          hindi pinipindot ng user ang Accept.
 ///
-/// Subukan:
+/// Subukan (may keyword → code):
 ///   "Zoe, remind me tomorrow at 7 PM to review my thesis"
-///   "remind me bukas to call mama"        → magtatanong ng oras
+///   "pa remind ako ng feb 12 2028 mga 9am kakain ako"
 ///   "add task buy groceries on Saturday"
 ///   "i-note mo: wifi password ng office ay zoe123"
 ///   "ano gagawin ko today?" · "ano ginawa ko kahapon?" · "ano na-miss ko?"
+/// Subukan (walang keyword → Qwen, ilang segundo):
+///   "kailangan kong bumili ng gatas sa Sabado"
+///   "wake me up at 6am" · "tandaan mo na ang locker code ko ay 4521"
 ///   "test error"                          → error state + Retry
 class ChatPreviewBrain {
-  ChatPreviewBrain({ReminderRepository? reminders, TaskRepository? tasks})
-      : _reminders = reminders ?? ReminderRepository(),
-        _tasks = tasks ?? TaskRepository();
+  ChatPreviewBrain({
+    ReminderRepository? reminders,
+    TaskRepository? tasks,
+    IntentClassifier? classifier,
+  })  : _reminders = reminders ?? ReminderRepository(),
+        _tasks = tasks ?? TaskRepository(),
+        _classifier = classifier ?? IntentClassifier();
 
-  /// true = gumagana ang chat kahit walang naka-download na model.
-  /// Gawing false kapag naka-wire na si Qwen.
+  /// true = gumagana ang chat (keywords) kahit walang naka-download na model.
   static const enabled = true;
 
   final ReminderRepository _reminders;
   final TaskRepository _tasks;
+  final IntentClassifier _classifier;
 
   ZoeLanguage _lang = ZoeLanguage.both;
 
@@ -44,42 +53,69 @@ class ChatPreviewBrain {
 
     if (lower == 'test error') throw StateError('UI preview error');
 
+    // 1) Code muna. 2) Kung hindi alam ng code → si Qwen (label lang).
+    var intent = _keywordIntent(lower);
+    if (intent == ZoeIntent.unknown) {
+      if (has(['salamat', 'thank'])) {
+        return [TextEntry(fromZoe: true, text: _t('Anytime! 💜', 'Walang anuman! 💜'))];
+      }
+      intent = await _classifier.classify(text) ?? ZoeIntent.unknown;
+    }
+
+    switch (intent) {
+      case ZoeIntent.createNote:
+        return [_note(text)];
+      case ZoeIntent.createReminder:
+        return [_reminder(text, lower)];
+      case ZoeIntent.createTask:
+        return [_task(text, lower)];
+      case ZoeIntent.getDone:
+        final day = has(['kahapon', 'yesterday']) ? _daysAgo(1) : _pastWeekday(lower);
+        return [await _doneOn(day ?? _daysAgo(1))];
+      case ZoeIntent.getMissed:
+        return [await _missed()];
+      case ZoeIntent.getToday:
+        return [await _today()];
+      case ZoeIntent.greeting:
+        return [
+          TextEntry(
+            fromZoe: true,
+            text: _t('Hi! What can I help you with today? 😊',
+                'Hi! Ano maitutulong ko sa\'yo today? 😊'),
+          ),
+        ];
+      case ZoeIntent.unknown:
+        return [
+          TextEntry(
+            fromZoe: true,
+            text: _t("Sorry, I didn't understand that. Can you say it another way?",
+                'Pasensya, hindi ko naintindihan. Pwede mo bang ulitin?'),
+            footnote: 'Try: "remind me…", "add task…", "i-note mo…"',
+          ),
+        ];
+    }
+  }
+
+  /// Mabilis na hula ng code mula sa keywords. unknown = ipasa kay Qwen.
+  ZoeIntent _keywordIntent(String lower) {
+    bool has(List<String> words) => words.any(lower.contains);
+
     if (has(['i-note', 'inote', 'i-save', 'isave', 'as note', 'as a note', 'note:', 'add note',
       'new note', 'add a note'])) {
-      return [_note(text)];
+      return ZoeIntent.createNote;
     }
-    if (has(['remind', 'paalala', 'ipaalala', 'alarm'])) return [_reminder(text, lower)];
-    if (has(['task', 'todo', 'to-do', 'gawain'])) return [_task(text, lower)];
-
-    if (has(['kahapon', 'yesterday'])) return [await _doneOn(_daysAgo(1))];
-    if (has(['ginawa', 'what did i do', 'natapos'])) {
-      return [await _doneOn(_pastWeekday(lower) ?? _daysAgo(1))];
+    if (has(['remind', 'paalala', 'ipaalala', 'alarm'])) return ZoeIntent.createReminder;
+    if (has(['task', 'todo', 'to-do', 'gawain'])) return ZoeIntent.createTask;
+    if (has(['kahapon', 'yesterday', 'ginawa', 'what did i do', 'natapos'])) {
+      return ZoeIntent.getDone;
     }
-    if (has(['miss', 'nakalimutan'])) return [await _missed()];
-    if (has(['today', 'ngayon', 'gagawin', 'schedule'])) return [await _today()];
-
+    if (has(['miss', 'nakalimutan'])) return ZoeIntent.getMissed;
+    if (has(['today', 'ngayon', 'gagawin', 'schedule'])) return ZoeIntent.getToday;
     if (RegExp(r'\b(hi|hello|hey|kumusta|musta|good (morning|afternoon|evening))\b')
         .hasMatch(lower)) {
-      return [
-        TextEntry(
-          fromZoe: true,
-          text: _t('Hi! What can I help you with today? 😊',
-              'Hi! Ano maitutulong ko sa\'yo today? 😊'),
-        ),
-      ];
+      return ZoeIntent.greeting;
     }
-    if (has(['salamat', 'thank'])) {
-      return [TextEntry(fromZoe: true, text: _t('Anytime! 💜', 'Walang anuman! 💜'))];
-    }
-
-    return [
-      TextEntry(
-        fromZoe: true,
-        text: _t("Sorry, I didn't understand that. Can you say it another way?",
-            'Pasensya, hindi ko naintindihan. Pwede mo bang ulitin?'),
-        footnote: 'UI preview: try "remind me…", "add task…", "i-note mo…"',
-      ),
-    ];
+    return ZoeIntent.unknown;
   }
 
   // ───────────────────────── Writes (cards) ─────────────────────────
@@ -92,7 +128,10 @@ class ChatPreviewBrain {
       final later = ZoeDate.combine(_today0, time).isAfter(DateTime.now());
       day = later ? _today0 : _today0.add(const Duration(days: 1));
     }
-    return completeReminder(ReminderDraft(title: _cleanTitle(text), date: day, time: time));
+    var title = _cleanTitle(text);
+    // "wake me up at 6am" → walang natirang title, pero malinaw ang ibig sabihin.
+    if (title.isEmpty && lower.contains('wake me up')) title = 'Wake up';
+    return completeReminder(ReminderDraft(title: title, date: day, time: time));
   }
 
   /// Kulang ang title → itanong. Kulang ang oras → chips. Kumpleto → card.
@@ -144,6 +183,9 @@ class ChatPreviewBrain {
         r'\b(pa)?(i-?save|i-?note)\s+mo(\s+(ito|to))?(\s+as\s+(a\s+)?note)?',
         r'\b(save|add)\s+(this\s+)?(as\s+)?(a\s+)?(new\s+)?note\b',
         r'\bnew\s+note\b',
+        r'\b(paki[\s-]?)?tandaan\s+mo(\s+(ito|to))?(\s+na)?\b',
+        r'\bwrite\s+(this|it)\s+down\b',
+        r'\bremember\s+(that|this)\b',
       ]) {
         content = content.replaceAll(RegExp(p, caseSensitive: false), ' ');
       }
@@ -252,7 +294,44 @@ class ChatPreviewBrain {
     'sunday': 7, 'linggo': 7,
   };
 
+  /// Walang "may" (Tagalog: "may 5 akong gagawin") — "mayo" ang gamitin.
+  static const _months = {
+    'january': 1, 'jan': 1, 'enero': 1,
+    'february': 2, 'feb': 2, 'pebrero': 2,
+    'march': 3, 'mar': 3, 'marso': 3,
+    'april': 4, 'apr': 4, 'abril': 4,
+    'mayo': 5,
+    'june': 6, 'jun': 6, 'hunyo': 6,
+    'july': 7, 'jul': 7, 'hulyo': 7,
+    'august': 8, 'aug': 8, 'agosto': 8,
+    'september': 9, 'sept': 9, 'sep': 9, 'setyembre': 9,
+    'october': 10, 'oct': 10, 'oktubre': 10,
+    'november': 11, 'nov': 11, 'nobyembre': 11,
+    'december': 12, 'dec': 12, 'disyembre': 12,
+  };
+
+  /// "feb 12", "Feb. 12, 2028", "disyembre 5" — buwan + araw (+ taon).
+  static final _monthDatePattern =
+      '\\b(${_months.keys.join('|')})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b';
+
+  /// Walang taon at lumipas na ngayong taon → susunod na taon.
+  DateTime? _monthDate(String lower) {
+    final m = RegExp(_monthDatePattern).firstMatch(lower);
+    if (m == null) return null;
+    final month = _months[m.group(1)!]!;
+    final dayNum = int.parse(m.group(2)!);
+    final year = int.tryParse(m.group(3) ?? '');
+    var date = DateTime(year ?? _today0.year, month, dayNum);
+    if (date.month != month) return null; // hal. "feb 31"
+    if (year == null && date.isBefore(_today0)) {
+      date = DateTime(_today0.year + 1, month, dayNum);
+    }
+    return date;
+  }
+
   DateTime? _day(String lower) {
+    final exact = _monthDate(lower);
+    if (exact != null) return exact;
     if (lower.contains('tomorrow') || lower.contains('bukas')) {
       return _today0.add(const Duration(days: 1));
     }
@@ -314,13 +393,20 @@ class ChatPreviewBrain {
     var s = text;
     for (final p in [
       r'\bzoe\b[,:]?',
-      r'\bremind\s+me\b',
+      r'\b(pa[\s-]?)?remind\s+(me|ako|mo\s+ako)\b',
+      r'\b(please\s+)?wake\s+me\s+up\b',
+      r'\b(huwag|wag)\s+mo(ng)?\s+kalimutan(g)?\s+(sabihan|paalalahanan)\s+(ako|ko)\b',
+      r'\b(i\s+need\s+to|i\s+have\s+to|kailangan\s+ko(ng)?)\b',
+      r'\b(pa)?gawan\s+mo\s+(ako|ko)(\s+ng)?\b',
+      r'\b(ang\s+)?title\s*(ay|is|:)?',
+      r'\b(time|oras)\s*(ay|is|:)?\s*(?=\d)',
+      '\\b(on|sa|ng|noong)?\\s*$_monthDatePattern',
       r'\b(pa)?paalala(han)?\s+mo\s+(ako|ko)\b',
       r'\bipaalala\s+mo(\s+sa\s+akin)?\b',
       r'\bset\s+(an?\s+)?(alarm|reminder)\b',
       r'\b(add|create|new)\s+(an?\s+)?(task|todo|to-do)\b',
       r'\b(task|todo|to-do|gawain)\b[:]?',
-      r'\b(at|by|sa|ng)?\s*\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)',
+      r'\b(at|by|sa|ng|mga)?\s*\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)',
       r'\b(at|sa)?\s*alas[\s-]*\d{1,2}(:\d{2})?',
       r'\b(at|by)?\s*([01]?\d|2[0-3]):[0-5]\d\b',
       r'\bng\s+(umaga|gabi|hapon|tanghali)\b',
