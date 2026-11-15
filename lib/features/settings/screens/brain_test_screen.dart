@@ -4,12 +4,17 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/ai/inference/inference_config.dart';
 import 'package:zoe_remind/ai/inference/qwen_engine.dart';
+import 'package:zoe_remind/core/constants/ai_constants.dart';
+import 'package:zoe_remind/core/constants/model_tier.dart';
+import 'package:zoe_remind/database/models/model_info.dart';
+import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 
 /// Developer › Brain Test: i-load si Qwen sa phone, magpadala ng isang prompt,
 /// at sukatin ang bilis at RAM. Para lang sa testing (hindi pa ito ang Zoe Chat).
 ///
-/// Round 2: may mga halimbawa (few-shot) na ang JSON mode.
+/// Round 2: may mga halimbawa (few-shot) na ang JSON mode, at pwedeng
+/// lumipat sa pagitan ng Zoe Lite (0.8B) at Zoe Plus (2B) para ikumpara.
 class BrainTestScreen extends StatefulWidget {
   const BrainTestScreen({super.key});
 
@@ -77,6 +82,7 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   ];
 
   final _brain = QwenEngine.instance;
+  final _settings = SettingsRepository();
   final _prompt = TextEditingController(
       text: 'Hi Zoe! Ano ang pwede mong gawin para sa akin?');
   final _out = StringBuffer();
@@ -85,6 +91,9 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   StreamSubscription<String>? _sub;
   Timer? _flush;
   String _error = '';
+
+  /// Estado ng Zoe Lite / Zoe Plus sa phone (alin ang ready).
+  Map<ModelTier, ModelInfo> _models = const {};
 
   // Sukat (perf)
   final _watch = Stopwatch();
@@ -97,12 +106,15 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   void initState() {
     super.initState();
     _brain.state.addListener(_onBrainChanged);
+    SettingsRepository.changes.addListener(_loadModels);
     _readRam();
+    _loadModels();
   }
 
   @override
   void dispose() {
     _brain.state.removeListener(_onBrainChanged);
+    SettingsRepository.changes.removeListener(_loadModels);
     _sub?.cancel(); // humihinto rin ang generation
     _flush?.cancel();
     _prompt.dispose();
@@ -112,6 +124,26 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   void _onBrainChanged() {
     _readRam();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadModels() async {
+    try {
+      final models = await _settings.getAllModels();
+      if (mounted) setState(() => _models = models);
+    } catch (e) {
+      debugPrint('Brain test: loading models failed: $e');
+    }
+  }
+
+  bool _isReady(ModelTier tier) => _models[tier]?.isReady ?? false;
+
+  /// Hal. "Zoe Plus · Qwen3.5-2B-Q4_K_M"
+  String get _loadedLabel {
+    final tier = _brain.loadedTier;
+    if (tier == null) return '–';
+    final file = _brain.loadedModelName;
+    final name = AiConstants.fallbackName(tier);
+    return file == null ? name : '$name · $file';
   }
 
   /// RAM ng buong app ngayon (RSS) at ang pinakamataas mula nang magbukas.
@@ -133,6 +165,23 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
     await _sub?.cancel();
     _sub = null;
     await _brain.unload();
+  }
+
+  /// Lumipat ng model at i-load agad. Pinapalitan din nito ang
+  /// "Ginagamit" sa Settings › Zoe's Brain.
+  Future<void> _switchTo(ModelTier tier) async {
+    if (!_isReady(tier) || tier == _brain.loadedTier) return;
+    final sub = _sub;
+    if (sub != null) {
+      await sub.cancel();
+      _finish();
+    }
+    if (mounted) setState(() => _error = '');
+    try {
+      await _brain.switchTo(tier);
+    } catch (e) {
+      if (mounted) setState(() => _error = '❌ Switch failed:\n$e');
+    }
   }
 
   void _setMode(_Mode mode) {
@@ -210,6 +259,7 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   Widget build(BuildContext context) {
     final state = _brain.state.value;
     final busy = state == BrainState.loading || state == BrainState.generating;
+    final loadedTier = _brain.loadedTier;
     final (label, color) = switch (state) {
       BrainState.unloaded => ('Not loaded', HomeColors.inkSoft),
       BrainState.loading => ('Loading… (ilang segundo)', const Color(0xFFF0AA45)),
@@ -240,12 +290,44 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
                   children: [
                     Text(label, style: TextStyle(fontWeight: FontWeight.w700, color: color)),
                     const SizedBox(height: 6),
+                    Text('Naka-load: $_loadedLabel',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
                     Text('Backend: ${_brain.backendName ?? '–'}'),
                     Text('Load time: ${_sec(_brain.lastLoadTime)}'),
                     Text('Context: ${InferenceConfig.contextSize} · '
                         'Threads: ${InferenceConfig.threads} · '
                         'CPU cores: ${Platform.numberOfProcessors}'),
                     Text('RAM ngayon: $_rssMb MB · Peak: $_peakRssMb MB'),
+                    const SizedBox(height: 12),
+
+                    // Lumipat ng model (ilo-load agad). Naka-disable ang hindi pa na-download.
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<ModelTier>(
+                        emptySelectionAllowed: true,
+                        showSelectedIcon: false,
+                        segments: [
+                          for (final tier in ModelTier.values)
+                            ButtonSegment(
+                              value: tier,
+                              enabled: _isReady(tier),
+                              label: Text(AiConstants.fallbackName(tier)),
+                            ),
+                        ],
+                        selected: {if (loadedTier != null) loadedTier},
+                        onSelectionChanged: busy
+                            ? null
+                            : (s) {
+                                if (s.isNotEmpty) _switchTo(s.first);
+                              },
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Pindutin para lumipat at i-load. Papalitan din nito ang '
+                      '"Ginagamit" sa Settings. Kulay-abo = hindi pa na-download.',
+                      style: TextStyle(color: HomeColors.inkSoft, fontSize: 12),
+                    ),
                     const SizedBox(height: 10),
                     Row(
                       children: [

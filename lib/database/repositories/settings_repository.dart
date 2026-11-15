@@ -138,10 +138,9 @@ class SettingsRepository {
   // ───────────────────────── Zoe's Brain (model_state) ─────────────────────────
   //
   // Dalawang row: id 1 = Zoe Lite, id 2 = Zoe Plus.
-  // Lite ang default ng lahat ng function, kaya gumagana pa rin
-  // ang lumang tawag na walang tier.
 
-  /// Aling model ang ginagamit ni Zoe ngayon (default: lite).
+  /// Aling model ang PINILI ng user (default: lite).
+  /// Hindi ito garantiya na ready ang model — tingnan ang [getUsableModel].
   Future<ModelTier> getActiveTier() async =>
       ModelTier.fromName(await _get(_kActiveModel)) ?? ModelTier.lite;
 
@@ -150,17 +149,37 @@ class SettingsRepository {
     changes.value++;
   }
 
-  Future<ModelStatus?> getModelStatus([ModelTier tier = ModelTier.lite]) async =>
+  Future<ModelStatus?> getModelStatus([ModelTier? tier]) async =>
       (await getModelInfo(tier)).status;
 
-  Future<ModelInfo> getModelInfo([ModelTier tier = ModelTier.lite]) async {
+  /// May [tier] → ang row ng model na iyon.
+  /// Walang tier → ang model na gamit ni Zoe ngayon ([getUsableModel]).
+  /// Ito ang tinatawag ng Zoe Chat para malaman kung pwede nang mag-chat.
+  Future<ModelInfo> getModelInfo([ModelTier? tier]) async {
+    if (tier == null) return getUsableModel();
     final db = await _db.database;
     final rows = await db.query('model_state',
         where: 'id = ?', whereArgs: [tier.rowId], limit: 1);
     return rows.isEmpty ? ModelInfo.empty(tier) : ModelInfo.fromRow(rows.first);
   }
 
-  /// Ang model na ginagamit ngayon.
+  /// Ang model na gamit ni Zoe ngayon:
+  /// 1. ang pinili, kung ready;
+  /// 2. kung hindi, ang isa pa, kung ready;
+  /// 3. kung walang ready, ang kasalukuyang dina-download / naka-queue;
+  /// 4. kung wala rin, ang row ng pinili (hal. "not downloaded").
+  Future<ModelInfo> getUsableModel() async {
+    final chosen = await getActiveTier();
+    final a = await getModelInfo(chosen);
+    if (a.isReady) return a;
+    final b = await getModelInfo(chosen.other);
+    if (b.isReady) return b;
+    if (a.isDownloading || a.isQueued) return a;
+    if (b.isDownloading || b.isQueued) return b;
+    return a;
+  }
+
+  /// Ang row ng model na pinili ng user (kahit hindi pa ready).
   Future<ModelInfo> getActiveModelInfo() async =>
       getModelInfo(await getActiveTier());
 
