@@ -9,6 +9,7 @@ enum ZoeIntent {
   createReminder('create_reminder'),
   createTask('create_task'),
   createNote('create_note'),
+  searchNotes('search_notes'),
   getToday('get_today'),
   getDone('get_done'),
   getMissed('get_missed'),
@@ -48,6 +49,7 @@ class IntentClassifier {
       'create_reminder = wants to be reminded or alerted at a time\n'
       'create_task = something they need to do (a to-do)\n'
       'create_note = wants a fact or text saved\n'
+      'search_notes = asks for a fact about themselves that they saved before\n'
       'get_today = asks what is scheduled or planned\n'
       'get_done = asks what they already finished\n'
       'get_missed = asks what they missed or forgot\n'
@@ -63,6 +65,8 @@ class IntentClassifier {
     ('I need to finish my report on Friday', ZoeIntent.createTask),
     ('tandaan mo na ang locker code ko ay 4521', ZoeIntent.createNote),
     ('write this down: plate number ABC 123', ZoeIntent.createNote),
+    ('nasaan na nga ang resibo ng laptop?', ZoeIntent.searchNotes),
+    ('do you remember the plate number I told you?', ZoeIntent.searchNotes),
     ('may lakad ba ako bukas?', ZoeIntent.getToday),
     ("what's on my plate?", ZoeIntent.getToday),
     ('what have I finished so far?', ZoeIntent.getDone),
