@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:zoe_remind/ai/model_manager/model_verifier.dart';
 import 'package:zoe_remind/app/app_config.dart';
+import 'package:zoe_remind/core/constants/model_tier.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/supabase/model_config_service.dart';
 
@@ -17,12 +18,16 @@ enum DownloadPhase { idle, fetchingConfig, downloading, verifying, done, failed,
 class DownloadProgress {
   const DownloadProgress({
     required this.phase,
+    this.tier = ModelTier.lite,
     this.received = 0,
     this.total = 0,
     this.message,
   });
 
   final DownloadPhase phase;
+
+  /// Aling model ang tinutukoy ng progress na ito.
+  final ModelTier tier;
   final int received;
   final int total;
 
@@ -42,11 +47,14 @@ class DownloadProgress {
   int get percent => ((fraction ?? 0) * 100).round();
 }
 
-// Dina-download ang AI model (Zoe's Brain) mula sa link na nasa Supabase.
+/// Dina-download ang AI model (Zoe's Brain) mula sa link na nasa Supabase.
 ///
 /// Pipeline (Master Plan §30):
 ///   Supabase (model_config) → HTTPS → `app/models/MODEL.gguf.part`
 ///   → SHA-256 check → rename → registerModel() → Local AI ready
+///
+/// Dalawang model (Zoe Lite / Zoe Plus), pero isang download lang
+/// sa isang pagkakataon.
 class ModelDownloader {
   ModelDownloader._();
   static final instance = ModelDownloader._();
@@ -61,7 +69,13 @@ class ModelDownloader {
 
   CancelToken? _cancel;
 
+  /// Ang tier ng kasalukuyan (o huling) download.
+  ModelTier _tier = ModelTier.lite;
+
   bool get isRunning => progress.value.isActive;
+
+  /// Aling model ang dina-download ngayon. null = walang tumatakbo.
+  ModelTier? get runningTier => isRunning ? progress.value.tier : null;
 
   /// Folder ng models sa loob ng app storage (hindi nakikita ng ibang apps,
   /// hindi kasama sa backup, nabubura kapag na-uninstall).
@@ -72,19 +86,22 @@ class ModelDownloader {
     return dir;
   }
 
-  /// Kinukuha ang active model config sa Supabase.
-  /// null = offline o walang active model.
-  Future<ModelConfig?> latestConfig() => ModelConfigService.fetchActive();
+  /// Kinukuha ang active model config ng isang tier sa Supabase.
+  /// null = offline o walang active model sa tier na iyon.
+  Future<ModelConfig?> latestConfig([ModelTier tier = ModelTier.lite]) =>
+      ModelConfigService.fetchTier(tier);
 
-  /// Simulan (o ituloy) ang download. Ligtas tawagin kahit tumatakbo na.
-  Future<void> start() async {
+  /// Simulan (o ituloy) ang download ng isang tier.
+  /// Kapag may tumatakbo nang download (kahit ibang tier), walang gagawin.
+  Future<void> start([ModelTier tier = ModelTier.lite]) async {
     if (isRunning) return;
+    _tier = tier;
     _cancel = CancelToken();
-    _emit(const DownloadProgress(phase: DownloadPhase.fetchingConfig));
+    _emit(DownloadPhase.fetchingConfig);
 
     try {
       // 1. Config mula sa Supabase (url, sha256, size).
-      final config = await latestConfig();
+      final config = await latestConfig(tier);
       if (config == null) {
         await _fail("Couldn't reach Zoe's server. Check your internet and try again.");
         return;
@@ -117,17 +134,15 @@ class ModelDownloader {
         existing = 0;
       }
 
-      await _settings.setModelStatus(ModelStatus.downloading);
-      _emit(DownloadProgress(
-          phase: DownloadPhase.downloading, received: existing, total: total));
+      await _settings.setModelStatus(ModelStatus.downloading, tier: tier);
+      _emit(DownloadPhase.downloading, received: existing, total: total);
 
       if (existing < total) {
         await _download(config.url, part, existing, total);
       }
 
       // 4. Secure Design: i-verify bago gamitin.
-      _emit(DownloadProgress(
-          phase: DownloadPhase.verifying, received: total, total: total));
+      _emit(DownloadPhase.verifying, received: total, total: total);
       final ok = await ModelVerifier.matches(
         path: partPath,
         expectedBytes: total,
@@ -144,8 +159,8 @@ class ModelDownloader {
       await _register(config, finalPath);
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
-        await _settings.setModelStatus(ModelStatus.skipped);
-        _emit(const DownloadProgress(phase: DownloadPhase.cancelled));
+        await _settings.setModelStatus(ModelStatus.skipped, tier: tier);
+        _emit(DownloadPhase.cancelled);
         return;
       }
       debugPrint('[ModelDownloader] Dio error: $e');
@@ -162,17 +177,24 @@ class ModelDownloader {
   void cancel() => _cancel?.cancel('user');
 
   /// Burahin ang mga naiwang .part (tinatawag ng [Delete] sa Settings).
-  Future<void> clearPartials() async {
+  /// May [modelName] (hal. Qwen3.5-2B-Q4_K_M) → .part ng model na iyon lang.
+  /// Wala → lahat ng .part.
+  /// Walang gagawin habang may tumatakbong download.
+  Future<void> clearPartials([String? modelName]) async {
     if (isRunning) return;
     try {
       final dir = await modelsDir();
-      await for (final f in dir.list()) {
-        if (f is File && f.path.endsWith('.part')) await f.delete();
+      if (modelName != null) {
+        await _safeDelete(File(p.join(dir.path, '$modelName.gguf.part')));
+      } else {
+        await for (final f in dir.list()) {
+          if (f is File && f.path.endsWith('.part')) await f.delete();
+        }
       }
     } catch (e) {
       debugPrint('[ModelDownloader] clearPartials failed: $e');
     }
-    _emit(DownloadProgress.idle);
+    progress.value = DownloadProgress.idle;
   }
 
   // ───────────────────────── internals ─────────────────────────
@@ -200,8 +222,7 @@ class ModelDownloader {
       await for (final chunk in response.data!.stream) {
         sink.add(chunk);
         received += chunk.length;
-        _emit(DownloadProgress(
-            phase: DownloadPhase.downloading, received: received, total: total));
+        _emit(DownloadPhase.downloading, received: received, total: total);
       }
       await sink.flush();
     } finally {
@@ -211,17 +232,19 @@ class ModelDownloader {
 
   Future<void> _register(ModelConfig config, String path) async {
     await _settings.registerModel(
+      tier: config.tier,
+      modelName: config.modelName,
       version: config.version,
       filePath: path,
       sizeBytes: config.sizeBytes,
     );
-    _emit(DownloadProgress(
-        phase: DownloadPhase.done, received: config.sizeBytes, total: config.sizeBytes));
+    _emit(DownloadPhase.done,
+        received: config.sizeBytes, total: config.sizeBytes);
   }
 
   Future<void> _fail(String message) async {
-    await _settings.setModelStatus(ModelStatus.failed);
-    _emit(DownloadProgress(phase: DownloadPhase.failed, message: message));
+    await _settings.setModelStatus(ModelStatus.failed, tier: _tier);
+    _emit(DownloadPhase.failed, message: message);
   }
 
   Future<void> _safeDelete(File f) async {
@@ -232,5 +255,20 @@ class ModelDownloader {
     }
   }
 
-  void _emit(DownloadProgress value) => progress.value = value;
+  /// Laging may kasamang tier ang progress, para alam ng Settings
+  /// kung aling card ang gagalaw.
+  void _emit(
+    DownloadPhase phase, {
+    int received = 0,
+    int total = 0,
+    String? message,
+  }) {
+    progress.value = DownloadProgress(
+      phase: phase,
+      tier: _tier,
+      received: received,
+      total: total,
+      message: message,
+    );
+  }
 }
