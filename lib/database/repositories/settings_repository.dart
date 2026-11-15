@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:zoe_remind/core/constants/model_tier.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/database/models/model_info.dart';
@@ -33,6 +34,7 @@ class SettingsRepository {
   static const _kDarkMode = 'dark_mode';
   static const _kLongTermMemory = 'long_term_memory';
   static const _kDeveloper = 'developer_unlocked';
+  static const _kActiveModel = 'active_model';
 
   static const maxName = 30;
 
@@ -43,6 +45,7 @@ class SettingsRepository {
 
   /// Saves everything from onboarding in one transaction: all or nothing.
   /// The onboarding_done flag is written last.
+  /// Zoe Lite lang ang dina-download sa onboarding.
   Future<void> completeOnboarding(OnboardingResult result) async {
     final db = await _db.database;
     final now = DateTime.now().toIso8601String();
@@ -53,7 +56,12 @@ class SettingsRepository {
       await _put(txn, _kLanguage, result.language.name, now);
       await txn.insert(
         'model_state',
-        {'id': 1, 'status': status.name, 'updated_at': now},
+        {
+          'id': ModelTier.lite.rowId,
+          'tier': ModelTier.lite.name,
+          'status': status.name,
+          'updated_at': now,
+        },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
       await txn.insert(
@@ -128,21 +136,57 @@ class SettingsRepository {
   Future<void> setDeveloperUnlocked(bool on) => setValue(_kDeveloper, '$on');
 
   // ───────────────────────── Zoe's Brain (model_state) ─────────────────────────
+  //
+  // Dalawang row: id 1 = Zoe Lite, id 2 = Zoe Plus.
+  // Lite ang default ng lahat ng function, kaya gumagana pa rin
+  // ang lumang tawag na walang tier.
 
-  Future<ModelStatus?> getModelStatus() async => (await getModelInfo()).status;
+  /// Aling model ang ginagamit ni Zoe ngayon (default: lite).
+  Future<ModelTier> getActiveTier() async =>
+      ModelTier.fromName(await _get(_kActiveModel)) ?? ModelTier.lite;
 
-  Future<ModelInfo> getModelInfo() async {
+  Future<void> setActiveTier(ModelTier tier) async {
+    await setValue(_kActiveModel, tier.name);
+    changes.value++;
+  }
+
+  Future<ModelStatus?> getModelStatus([ModelTier tier = ModelTier.lite]) async =>
+      (await getModelInfo(tier)).status;
+
+  Future<ModelInfo> getModelInfo([ModelTier tier = ModelTier.lite]) async {
     final db = await _db.database;
-    final rows = await db.query('model_state', where: 'id = 1', limit: 1);
-    return rows.isEmpty ? ModelInfo.none : ModelInfo.fromRow(rows.first);
+    final rows = await db.query('model_state',
+        where: 'id = ?', whereArgs: [tier.rowId], limit: 1);
+    return rows.isEmpty ? ModelInfo.empty(tier) : ModelInfo.fromRow(rows.first);
+  }
+
+  /// Ang model na ginagamit ngayon.
+  Future<ModelInfo> getActiveModelInfo() async =>
+      getModelInfo(await getActiveTier());
+
+  /// Lahat ng tier, kahit wala pang row (status = null).
+  Future<Map<ModelTier, ModelInfo>> getAllModels() async {
+    final result = <ModelTier, ModelInfo>{};
+    for (final tier in ModelTier.values) {
+      result[tier] = await getModelInfo(tier);
+    }
+    return result;
   }
 
   /// [Download] → pending (kukunin ng downloader). Cancel → skipped.
-  Future<void> setModelStatus(ModelStatus status) async {
+  Future<void> setModelStatus(
+    ModelStatus status, {
+    ModelTier tier = ModelTier.lite,
+  }) async {
     final db = await _db.database;
     await db.insert(
       'model_state',
-      {'id': 1, 'status': status.name, 'updated_at': DateTime.now().toIso8601String()},
+      {
+        'id': tier.rowId,
+        'tier': tier.name,
+        'status': status.name,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
     changes.value++;
@@ -150,6 +194,8 @@ class SettingsRepository {
 
   /// Tinatawag ng downloader kapag na-verify ang checksum.
   Future<void> registerModel({
+    ModelTier tier = ModelTier.lite,
+    String? modelName,
     required String version,
     required String filePath,
     required int sizeBytes,
@@ -159,7 +205,9 @@ class SettingsRepository {
     await db.insert(
       'model_state',
       {
-        'id': 1,
+        'id': tier.rowId,
+        'tier': tier.name,
+        'model_name': modelName,
         'status': ModelStatus.ready.name,
         'model_version': version,
         'file_path': filePath,
@@ -174,8 +222,10 @@ class SettingsRepository {
 
   /// [Delete]: burahin ang model file sa phone + i-reset ang model_state.
   /// Ligtas kahit wala pang file. Returns bytes na na-free (0 kung wala).
-  Future<int> deleteModel() async {
-    final info = await getModelInfo();
+  /// Kapag ang ginagamit na model ang binura at ready ang isa,
+  /// doon lilipat si Zoe.
+  Future<int> deleteModel([ModelTier tier = ModelTier.lite]) async {
+    final info = await getModelInfo(tier);
     var freed = 0;
     final path = info.filePath;
     if (path != null) {
@@ -189,7 +239,13 @@ class SettingsRepository {
         debugPrint('Deleting model file failed: $e');
       }
     }
-    await setModelStatus(ModelStatus.skipped); // REPLACE → version/path/size = null
+    // REPLACE → version/path/size = null
+    await setModelStatus(ModelStatus.skipped, tier: tier);
+
+    if (await getActiveTier() == tier) {
+      final other = tier.other;
+      if ((await getModelInfo(other)).isReady) await setActiveTier(other);
+    }
     return freed;
   }
 

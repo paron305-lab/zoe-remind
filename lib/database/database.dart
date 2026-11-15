@@ -23,7 +23,9 @@ class ZoeDatabase {
   /// v8: notes (Notes tab — typed + galing kay Zoe, pinned)
   /// v9: model_state.size_bytes / file_path / verified_at,
   ///     ai_conversations + ai_messages (Zoe Chat history), memories
-  static const _version = 9;
+  /// v10: model_state.tier / model_name, dalawang row na ang pwede
+  ///      (id 1 = Zoe Lite, id 2 = Zoe Plus)
+  static const _version = 10;
 
   Future<Database>? _opening;
 
@@ -69,6 +71,47 @@ class ZoeDatabase {
       await _addColumnIfMissing(db, 'model_state', 'file_path', 'TEXT');
       await _addColumnIfMissing(db, 'model_state', 'verified_at', 'TEXT');
     }
+    if (oldVersion < 10) {
+      await _rebuildModelState(db);
+    }
+  }
+
+  /// model_state: isang row kada model. id 1 = Zoe Lite, id 2 = Zoe Plus.
+  static String _modelStateSql(String table) => '''
+      CREATE TABLE IF NOT EXISTS $table (
+        id INTEGER PRIMARY KEY CHECK (id IN (1, 2)),
+        tier TEXT NOT NULL DEFAULT 'lite',
+        model_name TEXT,
+        status TEXT NOT NULL,
+        model_version TEXT,
+        size_bytes INTEGER,
+        file_path TEXT,
+        verified_at TEXT,
+        updated_at TEXT NOT NULL
+      )
+    ''';
+
+  /// v10: ang lumang model_state ay may CHECK (id = 1), kaya hindi
+  /// makakapasok ang row ng Zoe Plus. Hindi natatanggal ang CHECK sa
+  /// SQLite, kaya: gawa ng bagong table → kopya → palit.
+  /// Ang dating row (id 1) ay nagiging Zoe Lite. Ang 0.8B lang ang
+  /// model bago ang v10, kaya iyon ang model_name kapag may file na.
+  static Future<void> _rebuildModelState(Database db) async {
+    await db.execute('DROP TABLE IF EXISTS model_state_new');
+    await db.execute(_modelStateSql('model_state_new'));
+    await db.execute('''
+      INSERT INTO model_state_new
+        (id, tier, model_name, status, model_version,
+         size_bytes, file_path, verified_at, updated_at)
+      SELECT 1, 'lite',
+             CASE WHEN file_path IS NOT NULL THEN 'Qwen3.5-0.8B-Q4_K_M' END,
+             status, model_version,
+             size_bytes, file_path, verified_at, updated_at
+      FROM model_state
+      WHERE id = 1
+    ''');
+    await db.execute('DROP TABLE model_state');
+    await db.execute('ALTER TABLE model_state_new RENAME TO model_state');
   }
 
   /// Ang 7 dating categories. Isang beses lang ito tinatawag
@@ -146,17 +189,9 @@ class ZoeDatabase {
       )
     ''');
 
-    batch.execute('''
-      CREATE TABLE IF NOT EXISTS model_state (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        status TEXT NOT NULL,
-        model_version TEXT,
-        size_bytes INTEGER,
-        file_path TEXT,
-        verified_at TEXT,
-        updated_at TEXT NOT NULL
-      )
-    ''');
+    // Bagong install: v10 schema agad. Lumang install: hindi ito
+    // gagalaw (IF NOT EXISTS); _rebuildModelState ang mag-a-update.
+    batch.execute(_modelStateSql('model_state'));
 
     batch.execute('''
       CREATE TABLE IF NOT EXISTS user_profile (
