@@ -8,6 +8,8 @@ import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 
 /// Developer › Brain Test: i-load si Qwen sa phone, magpadala ng isang prompt,
 /// at sukatin ang bilis at RAM. Para lang sa testing (hindi pa ito ang Zoe Chat).
+///
+/// Round 2: may mga halimbawa (few-shot) na ang JSON mode.
 class BrainTestScreen extends StatefulWidget {
   const BrainTestScreen({super.key});
 
@@ -26,17 +28,53 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   static Color get _cream => HomeColors.cream;
 
   static const _chatSystem =
-      'Ikaw si Zoe, isang mabait na reminder assistant sa phone. '
-      'Sumagot nang maikli (1-3 pangungusap). Naiintindihan mo ang English, '
-      'Tagalog, at Taglish; sumagot sa parehong wika ng user.';
+      'You are Zoe, a friendly reminder assistant inside a phone app. '
+      'Reply in 1-2 short sentences. Reply in the same language the user used '
+      '(English, Tagalog, or Taglish). You can help with reminders, tasks, and notes.';
 
   static const _jsonSystem =
-      'You extract intent from the user message. Reply with ONLY one JSON object, '
-      'no extra text. Keys: "action" (one of: create_reminder, create_task, '
-      'create_note, get_today, unknown), "title" (string), "date_phrase" '
-      '(string or null, copy the words the user used), "time_phrase" '
-      '(string or null, copy the words the user used). The user may write in '
-      'English, Tagalog, or Taglish.';
+      'You convert the user message into ONE JSON object. Output JSON only.\n'
+      'Keys:\n'
+      '- "action": create_reminder, create_task, create_note, get_today, or unknown\n'
+      '- "title": what to do, short. Never put the date or time in the title.\n'
+      '- "date_phrase": the DAY words the user wrote (bukas, today, Friday, sa Lunes), '
+      'or null if the user gave no day\n'
+      '- "time_phrase": the CLOCK TIME the user wrote (8am, 3:30 pm, alas-singko), '
+      'or null if the user gave no time\n'
+      'The user writes in English, Tagalog, or Taglish.';
+
+  /// Mga halimbawa: (sinabi ng user, tamang JSON). Ipinapadala bilang
+  /// totoong user/assistant turns para gayahin ni Qwen ang pattern.
+  static const _jsonExamples = <(String, String)>[
+    (
+      'Paalala mo ako bukas ng 7am na magsimba',
+      '{"action":"create_reminder","title":"Magsimba","date_phrase":"bukas","time_phrase":"7am"}'
+    ),
+    (
+      'remind me to call mom at 3pm',
+      '{"action":"create_reminder","title":"Call mom","date_phrase":null,"time_phrase":"3pm"}'
+    ),
+    (
+      'gawan mo ako ng task sa Friday title ay mag-grocery',
+      '{"action":"create_task","title":"Mag-grocery","date_phrase":"Friday","time_phrase":null}'
+    ),
+    (
+      'add task today maglaba time 10 am',
+      '{"action":"create_task","title":"Maglaba","date_phrase":"today","time_phrase":"10 am"}'
+    ),
+    (
+      'i-note mo na ang wifi password ay zoe123',
+      '{"action":"create_note","title":"Wifi password ay zoe123","date_phrase":null,"time_phrase":null}'
+    ),
+    (
+      'ano ang schedule ko ngayon?',
+      '{"action":"get_today","title":"","date_phrase":"ngayon","time_phrase":null}'
+    ),
+    (
+      'kumusta ka na?',
+      '{"action":"unknown","title":"","date_phrase":null,"time_phrase":null}'
+    ),
+  ];
 
   final _brain = QwenEngine.instance;
   final _prompt = TextEditingController(
@@ -52,7 +90,6 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   final _watch = Stopwatch();
   Duration? _firstToken;
   Duration? _total;
-  int _chunks = 0;
   int _rssMb = 0;
   int _peakRssMb = 0;
 
@@ -107,6 +144,21 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
     });
   }
 
+  /// Chat: system + user. JSON: system + mga halimbawa + user.
+  List<BrainMessage> _buildMessages(String text) {
+    if (_mode == _Mode.chat) {
+      return [const BrainMessage.system(_chatSystem), BrainMessage.user(text)];
+    }
+    return [
+      const BrainMessage.system(_jsonSystem),
+      for (final (user, json) in _jsonExamples) ...[
+        BrainMessage.user(user),
+        BrainMessage.assistant(json),
+      ],
+      BrainMessage.user(text),
+    ];
+  }
+
   void _send() {
     final text = _prompt.text.trim();
     if (text.isEmpty || _brain.isGenerating) return;
@@ -114,17 +166,11 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
 
     _out.clear();
     _error = '';
-    _chunks = 0;
     _firstToken = null;
     _total = null;
     _watch
       ..reset()
       ..start();
-
-    final messages = [
-      BrainMessage.system(_mode == _Mode.chat ? _chatSystem : _jsonSystem),
-      BrainMessage.user(text),
-    ];
 
     // Hindi setState bawat token — ina-update ang screen tuwing 100 ms.
     _flush = Timer.periodic(const Duration(milliseconds: 100), (_) {
@@ -132,10 +178,9 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
       if (mounted) setState(() {});
     });
 
-    _sub = _brain.generate(messages, json: _mode == _Mode.json).listen(
+    _sub = _brain.generate(_buildMessages(text), json: _mode == _Mode.json).listen(
       (piece) {
         _firstToken ??= _watch.elapsed;
-        _chunks++;
         _out.write(piece);
       },
       onError: (Object e) {
@@ -160,16 +205,6 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
   void _stop() => _brain.stop();
 
   String _sec(Duration? d) => d == null ? '–' : '${(d.inMilliseconds / 1000).toStringAsFixed(1)} s';
-
-  /// ≈ tokens/sec (isang chunk ≈ isang token), binibilang mula sa unang token.
-  String get _speed {
-    final first = _firstToken;
-    final end = _total ?? _watch.elapsed;
-    if (first == null || _chunks < 2) return '–';
-    final secs = (end - first).inMilliseconds / 1000;
-    if (secs <= 0) return '–';
-    return '≈ ${((_chunks - 1) / secs).toStringAsFixed(1)} tok/s';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -292,8 +327,7 @@ class _BrainTestScreenState extends State<BrainTestScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Unang token: ${_sec(_firstToken)} · Total: ${_sec(_total)} · '
-              'Chunks: $_chunks · Bilis: $_speed',
+              'Unang token: ${_sec(_firstToken)} · Total: ${_sec(_total)}',
               style: TextStyle(color: HomeColors.inkSoft, fontSize: 13),
             ),
             if (_error.isNotEmpty || _brain.lastError != null) ...[
