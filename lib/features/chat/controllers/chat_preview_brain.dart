@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:zoe_remind/ai/parser/intent_classifier.dart';
+import 'package:zoe_remind/ai/parser/intent_rules.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/note.dart';
@@ -12,8 +15,8 @@ import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
-///   1. Keywords (code)  → mabilis, gumagana kahit walang model.
-///   2. Walang keyword?  → tinatanong si Qwen kung anong INTENT (label lang).
+///   1. IntentRules (code) → agad ang sagot, gumagana kahit walang model.
+///   2. Walang tumamang rule? → tinatanong si Qwen kung anong INTENT (label lang).
 ///   3. Date, time, title → laging code ang kumukuha (hindi si Qwen).
 ///   4. Lahat ng write    → confirmation card; walang nase-save hangga't
 ///                          hindi pinipindot ng user ang Accept.
@@ -27,9 +30,11 @@ import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 ///   "ano gagawin ko today?" · "ano ginawa ko kahapon?" · "ano na-miss ko?"
 ///   "ano locker code ko?"                 → hinahanap sa Notes (code)
 ///   "89+9"                                → code ang nagko-compute, hindi si Qwen
-/// Subukan (walang keyword → Qwen, ilang segundo):
-///   "kailangan kong bumili ng gatas sa Sabado"
-///   "wake me up at 6am" · "tandaan mo na ang locker code ko ay 4521"
+/// Subukan (walang salitang "remind/task/note" pero code pa rin → agad):
+///   "gisingin mo ako bukas ng 5:30am" · "kailangan kong magbayad ng kuryente"
+///   "tandaan mo, ang wifi password sa bahay ay zoe2026" · "busy ba ako bukas?"
+/// Subukan (walang tumamang rule → Qwen, ilang segundo):
+///   "sino ang presidente ng Pilipinas?" · "ang ganda ng panahon"
 ///   "test error"                          → error state + Retry
 class ChatPreviewBrain {
   ChatPreviewBrain({
@@ -52,6 +57,9 @@ class ChatPreviewBrain {
 
   ZoeLanguage _lang = ZoeLanguage.both;
 
+  /// true = nasimulan na ang pag-load kay Qwen sa background.
+  bool _warmStarted = false;
+
   /// English → [en], Tagalog / Both → [tl]. (Para sa maliliit na label lang.)
   String _t(String en, String tl) => _lang == ZoeLanguage.english ? en : tl;
 
@@ -61,7 +69,7 @@ class ChatPreviewBrain {
 
   Future<List<ChatEntry>> reply(String text, ZoeLanguage lang) async {
     _lang = lang;
-    final lower = text.toLowerCase().trim();
+    final lower = text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
     bool has(List<String> words) => words.any(lower.contains);
 
     if (lower == 'test error') throw StateError('UI preview error');
@@ -70,13 +78,20 @@ class ChatPreviewBrain {
     final math = _math(lower);
     if (math != null) return [TextEntry(fromZoe: true, text: math)];
 
-    // 1) Code muna. 2) Kung hindi alam ng code → si Qwen (label lang).
-    var intent = _keywordIntent(lower);
+    // 1) Code muna (agad). 2) Kung hindi alam ng code → si Qwen (label lang).
+    var intent = IntentRules.match(lower);
+    var askedQwen = false;
     if (intent == ZoeIntent.unknown) {
       if (has(['salamat', 'thank'])) {
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
       }
+      askedQwen = true;
       intent = await _classifier.classify(text) ?? ZoeIntent.unknown;
+    } else if (!_warmStarted) {
+      // Code ang sumagot ngayon. Habang nagbabasa ang user, ihanda na si Qwen
+      // sa background para mabilis na siya kapag kinailangan mamaya.
+      _warmStarted = true;
+      unawaited(_classifier.warmUp());
     }
 
     switch (intent) {
@@ -94,7 +109,8 @@ class ChatPreviewBrain {
       case ZoeIntent.getMissed:
         return [await _missed()];
       case ZoeIntent.getToday:
-        return [await _today()];
+        // "busy ba ako bukas?" → bukas ang titingnan, hindi today.
+        return [await _scheduleOn(_day(lower) ?? _today0)];
       case ZoeIntent.greeting:
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.greeting))];
       case ZoeIntent.unknown:
@@ -102,40 +118,13 @@ class ChatPreviewBrain {
           TextEntry(
             fromZoe: true,
             text: _say(ZoeSituation.unknown),
-            // "AI: …" = pansamantala, para makita sa screenshot ang sagot ni Qwen.
+            // "AI: …" = pansamantala, para makita sa screenshot ang sagot at
+            // bilis ni Qwen (hal. "unknown · 2.4s").
             footnote: 'Try: "remind me…", "add task…", "i-note mo…"'
-                ' · AI: ${IntentClassifier.lastResult}',
+                '${askedQwen ? ' · AI: ${IntentClassifier.lastResult}' : ''}',
           ),
         ];
     }
-  }
-
-  /// Mabilis na hula ng code mula sa keywords. unknown = ipasa kay Qwen.
-  ZoeIntent _keywordIntent(String lower) {
-    bool has(List<String> words) => words.any(lower.contains);
-
-    if (has(['i-note', 'inote', 'i-save', 'isave', 'as note', 'as a note', 'note:', 'add note',
-      'new note', 'add a note'])) {
-      return ZoeIntent.createNote;
-    }
-    if (has(['remind', 'paalala', 'ipaalala', 'alarm'])) return ZoeIntent.createReminder;
-    if (has(['task', 'todo', 'to-do', 'gawain'])) return ZoeIntent.createTask;
-    if (has(['kahapon', 'yesterday', 'ginawa', 'what did i do', 'natapos'])) {
-      return ZoeIntent.getDone;
-    }
-    if (has(['miss', 'nakalimutan'])) return ZoeIntent.getMissed;
-    if (has(['today', 'ngayon', 'gagawin', 'schedule'])) return ZoeIntent.getToday;
-    // "ano locker code ko?", "what's my wifi password?", "saan ko nilagay ang susi?"
-    if (RegExp(r"^(zoe[,\s]+)?(ano|anong|ano'ng|what|what's|whats|saan|nasaan|where|kailan|when|sino|who)\b")
-            .hasMatch(lower) &&
-        RegExp(r'\b(ko|my|akin|ako)\b').hasMatch(lower)) {
-      return ZoeIntent.searchNotes;
-    }
-    if (RegExp(r'\b(hi|hello|hey|kumusta|musta|good (morning|afternoon|evening))\b')
-        .hasMatch(lower)) {
-      return ZoeIntent.greeting;
-    }
-    return ZoeIntent.unknown;
   }
 
   // ───────────────────────── Writes (cards) ─────────────────────────
@@ -150,7 +139,8 @@ class ChatPreviewBrain {
     }
     var title = _cleanTitle(text);
     // "wake me up at 6am" → walang natirang title, pero malinaw ang ibig sabihin.
-    if (title.isEmpty && lower.contains('wake me up')) title = 'Wake up';
+    if (title.isEmpty && lower.contains('wake me')) title = 'Wake up';
+    if (title.isEmpty && lower.contains('gisingin')) title = _t('Wake up', 'Gumising');
     return completeReminder(ReminderDraft(title: title, date: day, time: time));
   }
 
@@ -195,7 +185,8 @@ class ChatPreviewBrain {
 
   ChatEntry _note(String text) {
     // "i-note mo: abc" → kunin ang nasa likod ng ":" kung meron.
-    final colon = text.indexOf(':');
+    // Hindi kasama ang ":" ng oras ("5:30").
+    final colon = text.indexOf(RegExp(r':(?!\d\d)'));
     var content = colon >= 0 ? text.substring(colon + 1) : text;
     if (colon < 0) {
       for (final p in [
@@ -204,8 +195,11 @@ class ChatPreviewBrain {
         r'\b(save|add)\s+(this\s+)?(as\s+)?(a\s+)?(new\s+)?note\b',
         r'\bnew\s+note\b',
         r'\b(paki[\s-]?)?tandaan\s+mo(\s+(ito|to))?(\s+na)?\b',
-        r'\bwrite\s+(this|it)\s+down\b',
+        r'\b(write|jot)\s+(this|it|that)\s+down\b',
         r'\bremember\s+(that|this)\b',
+        r'\b(keep|save)\s+(this|it)(\s+for\s+me)?\b',
+        r'\btake\s+note(\s+(that|of))?\b',
+        r'\b(isulat|i-?lista)\s+mo(\s+(ito|to))?(\s+na)?\b',
       ]) {
         content = content.replaceAll(RegExp(p, caseSensitive: false), ' ');
       }
@@ -233,6 +227,7 @@ class ChatPreviewBrain {
     'what', "what's", 'whats', 'is', 'are', 'was', 'the', 'my', 'a', 'an', 'of', 'where',
     'when', 'who', 'do', 'did', 'you', 'i', 'me', 'about', 'note', 'notes', 'remember',
     'nilagay', 'sinabi', 'told', 'again', 'please', 'paki',
+    'naaalala', 'naalala', 'natatandaan', 'tanda', 'pa', 'still',
   };
 
   /// "ano locker code ko?" → hanapin ang "locker" at "code" sa Notes.
@@ -317,8 +312,10 @@ class ChatPreviewBrain {
     return n.toStringAsFixed(4).replaceFirst(RegExp(r'0+$'), '');
   }
 
-  Future<ChatEntry> _today() async {
-    final day = _today0;
+  /// Ano ang naka-schedule sa [day] (today, bukas, o "sa Sabado").
+  Future<ChatEntry> _scheduleOn(DateTime day) async {
+    final isToday = ZoeDate.sameDay(day, _today0);
+    final label = ZoeDate.pretty(day);
     final reminders = await _reminders.getForDay(day);
     final tasks = (await _tasks.getAll()).where((t) => t.date == ZoeDate.key(day)).toList();
     final pending = tasks.where((t) => !t.isDone).toList();
@@ -328,12 +325,21 @@ class ChatPreviewBrain {
       ...pending.take(3).map((t) => t.title),
       ...reminders.take(2).map((r) => r.title),
     ];
-    final text = names.isEmpty
-        ? _say(ZoeSituation.todayFree)
-        : _say(ZoeSituation.todayList, {'items': names.join(', ')});
+    final items = names.join(', ');
+    final String text;
+    if (isToday) {
+      text = names.isEmpty
+          ? _say(ZoeSituation.todayFree)
+          : _say(ZoeSituation.todayList, {'items': items});
+    } else {
+      // Ililipat sa ZoeLines kasabay ng P2 Mood.
+      text = names.isEmpty
+          ? _t('Nothing scheduled on $label.', 'Wala kang naka-schedule sa $label.')
+          : _t('On $label you have: $items.', 'Sa $label, meron kang: $items.');
+    }
 
     return AnswerEntry(
-      assumption: 'Assuming today, ${ZoeDate.pretty(day)}',
+      assumption: isToday ? 'Assuming today, $label' : 'Assuming $label',
       text: text,
       rows: [
         if (pending.isNotEmpty)
@@ -444,7 +450,9 @@ class ChatPreviewBrain {
     if (lower.contains('tomorrow') || lower.contains('bukas')) {
       return _today0.add(const Duration(days: 1));
     }
-    if (RegExp(r'\b(today|ngayon|mamaya|tonight)\b').hasMatch(lower)) return _today0;
+    if (RegExp(r'\b(today|ngayon|ngayong|mamaya|mamayang|tonight|later)\b').hasMatch(lower)) {
+      return _today0;
+    }
     for (final e in _weekdays.entries) {
       if (RegExp('\\b${e.key}\\b').hasMatch(lower)) {
         var ahead = (e.value - _today0.weekday + 7) % 7;
@@ -503,9 +511,15 @@ class ChatPreviewBrain {
     for (final p in [
       r'\bzoe\b[,:]?',
       r'\b(pa[\s-]?)?remind\s+(me|ako|mo\s+ako)\b',
-      r'\b(please\s+)?wake\s+me\s+up\b',
+      r'\b(please\s+)?wake\s+me(\s+up)?\b',
+      r'\b(paki[\s-]?)?gisingin\s+mo\s+(ako|ko)\b',
+      r'\b(paki[\s-]?)?(sabihan|abisuhan|i-?alert)\s+mo\s+(ako|ko)\b',
+      r"\bdon'?t\s+let\s+me\s+forget\b",
       r'\b(huwag|wag)\s+mo(ng)?\s+kalimutan(g)?\s+(sabihan|paalalahanan)\s+(ako|ko)\b',
-      r'\b(i\s+need\s+to|i\s+have\s+to|kailangan\s+ko(ng)?)\b',
+      r'\b(huwag|wag)\s+mo(ng)?\s+(akong\s+)?kalimutan(g)?\b',
+      r"\b(i\s+need\s+to|i\s+have\s+to|i\s+got\s+to|i'?ve\s+got\s+to|i\s+must|i\s+should|i\s+gotta)\b",
+      r'\b(kailangan|kelangan|need)\s+ko(ng)?\b',
+      r'\bdapat\s+(ko(ng)?|akong)\b',
       r'\b(pa)?gawan\s+mo\s+(ako|ko)(\s+ng)?\b',
       r'\b(ang\s+)?title\s*(ay|is|:)?',
       r'\b(time|oras)\s*(ay|is|:)?\s*(?=\d)',
@@ -520,8 +534,8 @@ class ChatPreviewBrain {
       r'\b(at|by)?\s*([01]?\d|2[0-3]):[0-5]\d\b',
       r'\bng\s+(umaga|gabi|hapon|tanghali)\b',
       r'\b(at\s+)?(noon|tanghali)\b',
-      r'\b(tomorrow|bukas|today|ngayon|mamaya|tonight)\b',
-      r'\b(on|sa|this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|huwebes|biyernes|sabado|linggo)\b',
+      r'\b(tomorrow|bukas|today|ngayon|ngayong|mamaya|mamayang|tonight|later)\b',
+      r'\b(on|by|sa|this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|huwebes|biyernes|sabado|linggo)\b',
     ]) {
       s = s.replaceAll(RegExp(p, caseSensitive: false), ' ');
     }

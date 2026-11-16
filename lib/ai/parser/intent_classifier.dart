@@ -23,6 +23,7 @@ enum ZoeIntent {
 }
 
 /// Tinatanong si Qwen: "anong klaseng request ito?" — isang label lang ang sagot.
+/// Dito lang umaabot ang mga mensaheng HINDI nahulaan ng IntentRules (code).
 ///
 /// Sandbox rules:
 ///  • Input Guard: pinuputol ang sobrang habang input.
@@ -38,8 +39,46 @@ class IntentClassifier {
   static const maxInput = 300;
   static const timeout = Duration(seconds: 40);
 
-  /// Huling resulta (para sa debugging): "create_task", "null (timeout)", atbp.
+  /// Huling resulta at bilis (para sa debugging):
+  /// "create_task · 2.4s", "null (timeout) · 40.0s", atbp.
   static String lastResult = '–';
+
+  /// Tumatakbong (o tapos nang) paghahanda. null = hindi pa nasisimulan.
+  Future<void>? _warm;
+
+  /// Ihanda si Qwen sa background: i-load ang model at ipabasa na ang mahabang
+  /// bahagi ng prompt (rules + mga halimbawa). Sa susunod na tanong, ang
+  /// mensahe na lang ng user ang babasahin niya, kaya mas mabilis.
+  /// Ligtas tawagin nang paulit-ulit, at hindi nagta-throw.
+  Future<void> warmUp() => _warm ??= _doWarmUp();
+
+  Future<void> _doWarmUp() async {
+    try {
+      await _ask('hello');
+    } catch (e) {
+      if (e is TimeoutException) _engine.stop();
+      debugPrint('Intent warm-up failed: $e');
+      _warm = null; // pwedeng subukan ulit mamaya
+    }
+  }
+
+  /// Ipadala ang prompt + [input] kay Qwen; ibinabalik ang hilaw na sagot.
+  Future<String> _ask(String input) async {
+    final messages = [
+      const BrainMessage.system(_system),
+      for (final (user, intent) in _examples) ...[
+        BrainMessage.user(user),
+        BrainMessage.assistant(intent.label),
+      ],
+      BrainMessage.user(input),
+    ];
+    final out = StringBuffer();
+    await for (final piece
+        in _engine.generate(messages, maxTokens: 8, json: true).timeout(timeout)) {
+      out.write(piece);
+    }
+    return out.toString();
+  }
 
   static const _system =
       'You are an intent classifier for a reminder app. '
@@ -82,32 +121,28 @@ class IntentClassifier {
     if (input.isEmpty) return null;
     if (input.length > maxInput) input = input.substring(0, maxInput);
 
-    final messages = [
-      const BrainMessage.system(_system),
-      for (final (user, intent) in _examples) ...[
-        BrainMessage.user(user),
-        BrainMessage.assistant(intent.label),
-      ],
-      BrainMessage.user(input),
-    ];
+    // Kasama sa oras ang paghihintay sa load, para totoo ang nakikita ng user.
+    final watch = Stopwatch()..start();
+    String took() => '${(watch.elapsedMilliseconds / 1000).toStringAsFixed(1)}s';
+
+    // May tumatakbong paghahanda? Hintayin muna — isang generation lang
+    // ang kaya ni Qwen sa isang pagkakataon.
+    final warm = _warm;
+    if (warm != null) await warm;
 
     try {
-      final out = StringBuffer();
-      await for (final piece in _engine
-          .generate(messages, maxTokens: 8, json: true)
-          .timeout(timeout)) {
-        out.write(piece);
-      }
-      final intent = parse(out.toString());
-      lastResult = intent?.label ?? 'null (hindi label: "${out.toString().trim()}")';
+      final raw = await _ask(input);
+      final intent = parse(raw);
+      final label = intent?.label ?? 'null (hindi label: "${raw.trim()}")';
+      lastResult = '$label · ${took()}';
       return intent;
     } on TimeoutException {
       _engine.stop();
-      lastResult = 'null (timeout)';
+      lastResult = 'null (timeout) · ${took()}';
       return null;
     } catch (e) {
       debugPrint('Intent classify failed: $e');
-      lastResult = 'null ($e)';
+      lastResult = 'null ($e) · ${took()}';
       return null;
     }
   }
