@@ -121,4 +121,27 @@ void main() {
     expect(IntentRules.isQuestion('meeting kay boss 3pm bukas'), isFalse);
     expect(IntentRules.isQuestion('do the laundry 5pm'), isFalse);
   });
+
+  test('patayin ang alarm ay hindi bagong reminder', () {
+    for (final m in [
+      'Patayin mo ang alarm',
+      'turn off the alarm',
+      'i-off mo yung alarm ko',
+      'alarm off',
+    ]) {
+      expect(IntentRules.isStopAlarm(m), isTrue, reason: m);
+    }
+    for (final m in ['set an alarm for 6am', 'mag-alarm ka ng 5am', 'stop reminding me']) {
+      expect(IntentRules.isStopAlarm(m), isFalse, reason: m);
+    }
+  });
+
+  test('nararamdaman', () {
+    for (final m in ['Pagod na ako', "I'm so tired", 'nalulungkot ako ngayon', 'i feel sad']) {
+      expect(IntentRules.isFeeling(m), isTrue, reason: m);
+    }
+    for (final m in ['ang ganda ng panahon', 'sad movie', 'sino ang presidente ng Pilipinas?']) {
+      expect(IntentRules.isFeeling(m), isFalse, reason: m);
+    }
+  });
 }

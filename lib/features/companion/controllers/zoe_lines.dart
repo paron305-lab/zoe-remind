@@ -21,6 +21,12 @@ enum ZoeSituation {
   noteNotFound,
   mathDivideByZero,
 
+  /// "patayin mo ang alarm" — hindi pa kaya mula sa chat.
+  stopAlarmHelp,
+
+  /// "pagod na ako", "I'm sad" — nagkukuwento ng nararamdaman.
+  comfort,
+
   /// Mensaheng tungkol sa pananakit sa sarili (tingnan ang CrisisGuard).
   crisis,
 }
@@ -169,6 +175,40 @@ class ZoeLines {
       ZoeLanguage.english: ["That one can't be divided by zero."],
       ZoeLanguage.tagalog: ['Hindi pwedeng hatiin sa zero.'],
       ZoeLanguage.both: ['Hindi pwedeng i-divide sa zero.'],
+    },
+    ZoeSituation.stopAlarmHelp: {
+      ZoeLanguage.english: [
+        "I can't turn off an alarm from chat yet. When it rings, tap Done or Dismiss. "
+            'To stop it from ringing again, switch off the bell on that reminder.',
+      ],
+      ZoeLanguage.tagalog: [
+        'Hindi ko pa kayang patayin ang alarm mula sa chat. Kapag tumunog, pindutin ang '
+            'Done o Dismiss. Para hindi na ito tumunog ulit, i-off ang bell ng reminder na iyon.',
+      ],
+      ZoeLanguage.both: [
+        'Hindi ko pa kayang i-off ang alarm from chat. Kapag tumunog, tap Done o Dismiss. '
+            'Para hindi na tumunog ulit, i-off ang bell ng reminder na iyon.',
+      ],
+    },
+    ZoeSituation.comfort: {
+      ZoeLanguage.english: [
+        "That sounds like a heavy day. It's okay to rest. I'm here if you want me to "
+            'keep track of something for you.',
+        "I'm sorry it feels that way right now. Take it one small step at a time. "
+            'Want me to hold on to anything so you can rest?',
+      ],
+      ZoeLanguage.tagalog: [
+        'Mukhang mabigat ang araw mo. Okay lang magpahinga. Nandito ako kung may gusto '
+            'kang ipatanda sa akin.',
+        'Pasensya at ganyan ang nararamdaman mo ngayon. Paisa-isang hakbang lang. May '
+            'gusto ka bang ipaalala ko para makapagpahinga ka?',
+      ],
+      ZoeLanguage.both: [
+        'Mukhang heavy ang araw mo. Okay lang magpahinga. Nandito ako kung may gusto '
+            'kang ipatanda sa akin.',
+        'Sorry at ganyan ang feeling mo ngayon. One step at a time lang. May gusto ka '
+            'bang i-remind ko para makapagpahinga ka?',
+      ],
     },
     // Isang linya lang kada language — sadyang hindi paiba-iba.
     // Ang mga numero ay galing sa CrisisGuard.lineVars.

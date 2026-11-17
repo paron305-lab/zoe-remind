@@ -39,8 +39,8 @@ class IntentClassifier {
   static const maxInput = 300;
   static const timeout = Duration(seconds: 40);
 
-  /// Huling resulta at bilis (para sa debugging):
-  /// "create_task · 2.4s", "null (timeout) · 40.0s", atbp.
+  /// Huling resulta, bilis, at model (para sa debugging):
+  /// "create_task · 2.4s · lite", "null (timeout) · 40.0s · plus", atbp.
   static String lastResult = '–';
 
   /// Tumatakbong (o tapos nang) paghahanda. null = hindi pa nasisimulan.
@@ -95,22 +95,18 @@ class IntentClassifier {
       'greeting = hello, thanks, small talk\n'
       'unknown = anything else';
 
-  /// Mga halimbawang WALANG karaniwang keyword (remind, task, note) —
-  /// kasi ang may keyword ay nahuhuli na ng code bago pa umabot dito.
+  /// Maiikling halimbawa, isa kada label. Sadyang kaunti: bawat halimbawa ay
+  /// binabasa ni Qwen sa bawat tanong, kaya mas marami = mas mabagal.
+  /// Ang mga karaniwang pagkakasabi ay nahuhuli na ng IntentRules (code).
   static const _examples = <(String, ZoeIntent)>[
-    ('huwag mong kalimutang sabihan ako bukas 8am na uminom ng gamot', ZoeIntent.createReminder),
-    ('wake me up at 6am', ZoeIntent.createReminder),
-    ('kailangan kong bumili ng gatas sa Sabado', ZoeIntent.createTask),
-    ('I need to finish my report on Friday', ZoeIntent.createTask),
-    ('tandaan mo na ang locker code ko ay 4521', ZoeIntent.createNote),
-    ('write this down: plate number ABC 123', ZoeIntent.createNote),
-    ('nasaan na nga ang resibo ng laptop?', ZoeIntent.searchNotes),
-    ('do you remember the plate number I told you?', ZoeIntent.searchNotes),
-    ('may lakad ba ako bukas?', ZoeIntent.getToday),
-    ("what's on my plate?", ZoeIntent.getToday),
-    ('what have I finished so far?', ZoeIntent.getDone),
-    ('may nakaligtaan ba ako?', ZoeIntent.getMissed),
-    ('kumusta ka na', ZoeIntent.greeting),
+    ('pakiabisuhan ako 8am bukas, inom ng gamot', ZoeIntent.createReminder),
+    ('bibili pa ako ng gatas sa Sabado', ZoeIntent.createTask),
+    ('ang locker code ko ay 4521', ZoeIntent.createNote),
+    ('yung plate number na binigay ko dati?', ZoeIntent.searchNotes),
+    ('anong meron bukas?', ZoeIntent.getToday),
+    ('how much have I gotten through?', ZoeIntent.getDone),
+    ('may naiwan ba akong hindi nagawa?', ZoeIntent.getMissed),
+    ('nandito ka ba', ZoeIntent.greeting),
     ('what is the capital of France?', ZoeIntent.unknown),
     ('ang ganda ng panahon', ZoeIntent.unknown),
   ];
@@ -123,7 +119,8 @@ class IntentClassifier {
 
     // Kasama sa oras ang paghihintay sa load, para totoo ang nakikita ng user.
     final watch = Stopwatch()..start();
-    String took() => '${(watch.elapsedMilliseconds / 1000).toStringAsFixed(1)}s';
+    String took() => '${(watch.elapsedMilliseconds / 1000).toStringAsFixed(1)}s'
+        ' · ${_engine.loadedTier?.name ?? 'walang model'}';
 
     // May tumatakbong paghahanda? Hintayin muna — isang generation lang
     // ang kaya ni Qwen sa isang pagkakataon.

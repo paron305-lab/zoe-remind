@@ -28,7 +28,9 @@ class CrisisGuard {
   static final _patterns = <RegExp>[
     // ── Tagalog ──
     RegExp(r'pakamatay|magbigti|magbibigti|laslas'),
-    RegExp(r'\b(gusto|nais) ko (na|nang|ng) (mamatay|mawala sa mundo)'),
+    RegExp(r'\b(gusto|nais) ko(ng)?( na| nang| ng)?( lang)? (mamatay|mawala sa mundo)'),
+    RegExp(r'\bpaano (ba )?(ako )?(ang )?(mamatay|magpakamatay)'),
+    RegExp(r'\bmamatay na (lang |lamang )?ako\b'),
     RegExp(r'\b(ayoko|ayaw ko) (na|nang) (mabuhay|magising)'),
     RegExp(r'\bsana (mamatay|patay) na (lang |lamang )?ako'),
     RegExp(r'\bsana (hindi|di) na (lang )?ako (magising|ipinanganak)'),
@@ -50,6 +52,7 @@ class CrisisGuard {
     RegExp(r"\b(don'?t|do not|dont) (want|wanna) to (live|be alive|exist|wake up)\b"),
     RegExp(r'\bno (reason|point) (to|in) (live|living)\b'),
     RegExp(r'\bbetter off (dead|without me)\b'),
+    RegExp(r'\b(how (to|do i|can i|do you)|ways? to) (die|end it all)\b'),
   ];
 
   /// true = may senyales ng pananakit sa sarili → crisis reply, walang Qwen.

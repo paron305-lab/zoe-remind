@@ -131,4 +131,29 @@ class IntentRules {
     }
     return ZoeIntent.unknown;
   }
+
+  static final _stopAlarm = RegExp(
+    r'\b(patayin|pinatay|i-?off|itigil|ihinto|tanggalin|turn off|switch off|stop|cancel'
+    r'|disable|silence|mute)\b.*\balarm'
+    r'|\balarm\b.*\b(off|patayin|itigil|ihinto)\b',
+  );
+
+  /// "patayin mo ang alarm", "turn off the alarm" — HINDI ito bagong reminder.
+  /// Chine-check ito bago ang [match], dahil may salitang "alarm".
+  static bool isStopAlarm(String text) => _stopAlarm.hasMatch(_clean(text));
+
+  static final _feelingWord = RegExp(
+    r'\b(pagod|napapagod|nakakapagod|malungkot|nalulungkot|nahihirapan|kinakabahan'
+    r'|stressed|na-?stress|nai-?stress|nag-?iisa|tired|exhausted|sad|lonely|burned out'
+    r'|burnt out|overwhelmed|anxious|depressed)\b',
+  );
+  static final _aboutMe = RegExp(r"\b(ako|ko|akong|i'?m|i am|i feel|feeling)\b");
+
+  /// "pagod na ako", "I'm so tired" — nagkukuwento lang ng nararamdaman.
+  /// Ginagamit lang kapag WALANG tumamang rule sa [match], kaya ang
+  /// "remind me to rest, pagod ako" ay reminder pa rin.
+  static bool isFeeling(String text) {
+    final lower = _clean(text);
+    return _feelingWord.hasMatch(lower) && _aboutMe.hasMatch(lower);
+  }
 }

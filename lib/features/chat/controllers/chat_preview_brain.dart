@@ -91,12 +91,21 @@ class ChatPreviewBrain {
     final math = _math(lower);
     if (math != null) return [TextEntry(fromZoe: true, text: math)];
 
+    // "patayin mo ang alarm" → tulong, hindi bagong reminder.
+    if (IntentRules.isStopAlarm(lower)) {
+      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.stopAlarmHelp))];
+    }
+
     // 1) Code muna (agad). 2) Kung hindi alam ng code → si Qwen (label lang).
     var intent = IntentRules.match(lower);
     var askedQwen = false;
     if (intent == ZoeIntent.unknown) {
       if (has(['salamat', 'thank'])) {
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
+      }
+      // "pagod na ako" → maikling malasakit, agad (hindi na kay Qwen).
+      if (IntentRules.isFeeling(lower)) {
+        return [TextEntry(fromZoe: true, text: _say(ZoeSituation.comfort))];
       }
       askedQwen = true;
       intent = await _classifier.classify(text) ?? ZoeIntent.unknown;
