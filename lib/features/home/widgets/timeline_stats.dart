@@ -25,9 +25,17 @@ class TimelineStats extends StatelessWidget {
             children: [
               Text("Today's timeline", style: HomeText.sectionTitle),
               const Spacer(),
-              GestureDetector(
-                onTap: onSeeAll,
-                child: Text('See all', style: HomeText.link),
+              // Mas malaking pindutan (hindi lang ang text mismo).
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: onSeeAll,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    child: Text('See all', style: HomeText.link),
+                  ),
+                ),
               ),
             ],
           ),

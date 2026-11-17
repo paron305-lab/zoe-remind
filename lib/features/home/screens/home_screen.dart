@@ -9,6 +9,7 @@ import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/database/repositories/statistics_repository.dart';
 import 'package:zoe_remind/features/home/models/home_item.dart';
 import 'package:zoe_remind/features/home/widgets/home_header.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
@@ -35,6 +36,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<HomeItem> _upcoming = const [];
   bool _loading = true;
   bool _remindersOn = true;
+
+  /// Sunod-sunod na araw na may natapos (galing sa completion_history).
+  int _streak = 0;
   ZoeLanguage _language = ZoeLanguage.both;
 
   /// Bawat minuto: i-refresh para maging "Missed" / "Done ✓" ang lumipas na.
@@ -140,8 +144,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await _reminders.recordMissed(pending: active, now: now);
       final todayList = await _reminders.getForDay(today);
       final upcoming = await _reminders.getUpcoming(days: 30);
+      final streak = await StatisticsRepository().dayStreak(now: now);
       if (!mounted) return;
       setState(() {
+        _streak = streak;
         _today = [
           for (final r in todayList) _toItem(r, today, now: now, activeAlarms: active),
         ];
@@ -258,6 +264,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) ZoeSnack.show(context, 'Reminder saved ✨');
   }
 
+  /// "See all" → Your Zoe History.
+  /// go() (hindi push) dahil nasa loob ng Home branch ang /home/history —
+  /// mas sigurado ito sa StatefulShellRoute. Nire-refresh ang Home ng
+  /// mga listener (changes) at ng timer kaya walang kailangang i-await.
+  void _openHistory() {
+    HapticFeedback.selectionClick();
+    context.go('/home/history');
+  }
+
   Future<void> _openEdit(HomeItem item) async {
     // History 🔒 → read-only view
     final path = item.locked
@@ -326,7 +341,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           onStatusTap: _markLate,
                         ),
                       const SizedBox(height: 20),
-                      TimelineStats(tasksLeft: left, reminders: reminders, streak: 7),
+                      TimelineStats(
+                        tasksLeft: left,
+                        reminders: reminders,
+                        streak: _streak,
+                        onSeeAll: _openHistory,
+                      ),
                       if (_upcoming.isNotEmpty) ...[
                         Padding(
                           padding: EdgeInsets.fromLTRB(20, 28, 20, 14),
