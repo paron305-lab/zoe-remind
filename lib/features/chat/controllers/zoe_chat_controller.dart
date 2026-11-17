@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/ai/parser/crisis_guard.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/model_info.dart';
@@ -210,6 +211,9 @@ class ZoeChatController extends ChangeNotifier {
 
   /// Ang type ng user ay sagot sa tanong ni Zoe.
   ChatEntry? _answerClarify(ClarifyEntry c, String text) {
+    // Kahit may nakabinbing tanong ("Anong oras?"), hindi ginagawang title o
+    // note ang mensaheng tungkol sa pananakit sa sarili → crisis reply.
+    if (CrisisGuard.matches(text)) return null;
     final title = text.length > 100 ? text.substring(0, 100) : text;
     if (c.reminder != null) {
       final d = c.reminder!;

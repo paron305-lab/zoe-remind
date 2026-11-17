@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart' show TimeOfDay;
+import 'package:zoe_remind/ai/parser/crisis_guard.dart';
 import 'package:zoe_remind/ai/parser/intent_classifier.dart';
 import 'package:zoe_remind/ai/parser/intent_rules.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
@@ -15,6 +16,7 @@ import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
+///   0. CrisisGuard (code) → laging una; hindi dumadaan kay Qwen kailanman.
 ///   1. IntentRules (code) → agad ang sagot, gumagana kahit walang model.
 ///   2. Walang tumamang rule? → tinatanong si Qwen kung anong INTENT (label lang).
 ///   3. Date, time, title → laging code ang kumukuha (hindi si Qwen).
@@ -71,6 +73,17 @@ class ChatPreviewBrain {
     _lang = lang;
     final lower = text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
     bool has(List<String> words) => words.any(lower.contains);
+
+    // Laging una: pananakit sa sarili → nakahandang sagot + hotline.
+    // Walang card, walang Qwen, walang ibang rule na makakasapaw.
+    if (CrisisGuard.matches(text)) {
+      return [
+        TextEntry(
+          fromZoe: true,
+          text: _say(ZoeSituation.crisis, CrisisGuard.lineVars),
+        ),
+      ];
+    }
 
     if (lower == 'test error') throw StateError('UI preview error');
 

@@ -20,6 +20,9 @@ enum ZoeSituation {
   noteFound,
   noteNotFound,
   mathDivideByZero,
+
+  /// Mensaheng tungkol sa pananakit sa sarili (tingnan ang CrisisGuard).
+  crisis,
 }
 
 /// Zoe Lines — ang boses ni Zoe (Personality plan, P1 Voice).
@@ -166,6 +169,42 @@ class ZoeLines {
       ZoeLanguage.english: ["That one can't be divided by zero."],
       ZoeLanguage.tagalog: ['Hindi pwedeng hatiin sa zero.'],
       ZoeLanguage.both: ['Hindi pwedeng i-divide sa zero.'],
+    },
+    // Isang linya lang kada language — sadyang hindi paiba-iba.
+    // Ang mga numero ay galing sa CrisisGuard.lineVars.
+    ZoeSituation.crisis: {
+      ZoeLanguage.english: [
+        "Thank you for telling me. I'm really sorry you're going through this, and "
+            "you don't have to face it alone.\n\n"
+            'Please talk to someone who can help right now. The NCMH Crisis Hotline '
+            'is open 24/7:\n'
+            '• {landline} (landline)\n'
+            '• {globe} (Globe/TM)\n'
+            '• {smart} (Smart/TNT)\n\n'
+            'If you are in danger right now, call {emergency} or go to someone you trust.',
+      ],
+      ZoeLanguage.tagalog: [
+        'Salamat at sinabi mo sa akin. Nalulungkot ako na ganito ang pinagdadaanan mo, '
+            'at hindi mo ito kailangang harapin nang mag-isa.\n\n'
+            'Pakiusap, makipag-usap ka sa taong makakatulong ngayon din. Bukas 24 oras '
+            'ang NCMH Crisis Hotline:\n'
+            '• {landline} (landline)\n'
+            '• {globe} (Globe/TM)\n'
+            '• {smart} (Smart/TNT)\n\n'
+            'Kung nasa panganib ka ngayon, tumawag sa {emergency} o lumapit sa taong '
+            'pinagkakatiwalaan mo.',
+      ],
+      ZoeLanguage.both: [
+        'Salamat at sinabi mo sa akin. Nalulungkot ako na ganito ang pinagdadaanan mo, '
+            'at hindi mo ito kailangang harapin nang mag-isa.\n\n'
+            'Please, makipag-usap ka sa taong makakatulong ngayon din. Open 24/7 '
+            'ang NCMH Crisis Hotline:\n'
+            '• {landline} (landline)\n'
+            '• {globe} (Globe/TM)\n'
+            '• {smart} (Smart/TNT)\n\n'
+            'Kung nasa panganib ka ngayon, tumawag sa {emergency} o lumapit sa taong '
+            'pinagkakatiwalaan mo.',
+      ],
     },
   };
 }
