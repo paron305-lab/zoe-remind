@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:zoe_remind/core/constants/zoe_language.dart';
+import 'package:zoe_remind/features/companion/models/user_tone.dart';
 
 /// Mga sitwasyon kung saan may sinasabi si Zoe.
 enum ZoeSituation {
@@ -55,6 +56,25 @@ enum ZoeSituation {
 
   /// May natapos na pero may natitira pa. {done} ay numero.
   homeKeepGoing,
+
+  // ── Sagot ayon sa nararamdaman ng user (ToneDetector) ────────────
+  /// "pagod na ako", "I'm so tired", "puyat ako"
+  feelingTired,
+
+  /// "ang dami ko pang gagawin", "stressed ako", "overwhelmed"
+  feelingStressed,
+
+  /// "nalulungkot ako", "I feel sad", "naiiyak ako"
+  feelingSad,
+
+  /// "nakakainis", "badtrip ako", "I'm so annoyed"
+  feelingUpset,
+
+  /// "kinakabahan ako", "I'm nervous", "nag-aalala ako"
+  feelingWorried,
+
+  /// "natapos ko na lahat!!", "yay!", "hahaha"
+  feelingHappy,
 }
 
 /// Zoe Lines — ang boses ni Zoe (Personality plan, P1 Voice).
@@ -124,6 +144,17 @@ class ZoeLines {
     if (done >= total) return ZoeSituation.homeAllDone;
     return ZoeSituation.homeKeepGoing;
   }
+
+  /// Aling script ang sasagot sa nararamdaman ng user? Neutral → null.
+  static ZoeSituation? situationForTone(UserTone tone) => switch (tone) {
+        UserTone.neutral => null,
+        UserTone.happy => ZoeSituation.feelingHappy,
+        UserTone.tired => ZoeSituation.feelingTired,
+        UserTone.stressed => ZoeSituation.feelingStressed,
+        UserTone.sad => ZoeSituation.feelingSad,
+        UserTone.upset => ZoeSituation.feelingUpset,
+        UserTone.worried => ZoeSituation.feelingWorried,
+      };
 
   /// Para sa test: may linya ba ang [situation] sa lahat ng language?
   static bool hasAllLanguages(ZoeSituation situation) {
@@ -361,6 +392,110 @@ class ZoeLines {
       ZoeLanguage.english: ['{done} done already — keep going 💪'],
       ZoeLanguage.tagalog: ['{done} na ang tapos — tuloy lang 💪'],
       ZoeLanguage.both: ['{done} na ang tapos — keep going 💪'],
+    },
+
+    // ── Sagot ayon sa nararamdaman ng user ───────────────────────────
+    // Mga rules: maikli, mainit, walang paninisi, hindi nagda-diagnose.
+    // Ang inaalok na tulong ay mga bagay na KAYA na ni Zoe (reminder, listahan).
+    ZoeSituation.feelingTired: {
+      ZoeLanguage.english: [
+        "Sounds like you're running low. Rest counts too. Want me to remind you to "
+            'take a break later?',
+        "You've done a lot today. Take it easy for a bit — I'll keep track of things for you.",
+      ],
+      ZoeLanguage.tagalog: [
+        'Mukhang pagod ka na. Mahalaga rin ang pahinga. Gusto mo bang paalalahanan '
+            'kita mamaya na magpahinga?',
+        'Ang dami mo nang nagawa ngayong araw. Magpahinga ka muna, ako na ang '
+            'magbabantay sa mga gagawin mo.',
+      ],
+      ZoeLanguage.both: [
+        'Mukhang drained ka na. Rest counts din. Gusto mo i-remind kita mamaya na '
+            'mag-break?',
+        'Ang dami mo nang nagawa today. Pahinga ka muna, ako na bahala mag-track.',
+      ],
+    },
+    ZoeSituation.feelingStressed: {
+      ZoeLanguage.english: [
+        "That's a lot on your plate. Let's take it one at a time. Tell me the most "
+            "important one and I'll set a reminder for it.",
+        "Okay, deep breath. You don't have to do everything at once. Ask me "
+            '"what\'s today" and we\'ll look at it together.',
+      ],
+      ZoeLanguage.tagalog: [
+        'Ang dami nga. Isa-isa lang tayo. Sabihin mo ang pinakamahalaga at '
+            'ise-set ko ang reminder.',
+        'Sige, hinga muna nang malalim. Hindi mo kailangang gawin lahat nang sabay. '
+            'Itanong mo sa akin "ano meron ngayon" at titingnan natin nang magkasama.',
+      ],
+      ZoeLanguage.both: [
+        "Ang dami nga. One at a time lang tayo. Sabihin mo yung pinaka-importante "
+            "at ise-set ko ang reminder.",
+        'Okay, deep breath muna. Di mo kailangang gawin lahat at once. Tanong mo '
+            'sa akin "ano meron today" at sabay nating titingnan.',
+      ],
+    },
+    ZoeSituation.feelingSad: {
+      ZoeLanguage.english: [
+        "I'm sorry you're feeling down. You don't have to explain. It's okay to go "
+            'easy on yourself today.',
+        'That sounds hard. Is there someone you trust you could talk to today? '
+            'I can remind you to reach out.',
+      ],
+      ZoeLanguage.tagalog: [
+        'Pasensya at malungkot ka. Hindi mo kailangang magpaliwanag. Okay lang na '
+            'dahan-dahan ka ngayon.',
+        'Mabigat iyan. May taong pinagkakatiwalaan ka ba na pwede mong kausapin '
+            'ngayon? Pwede kitang paalalahanan na i-message sila.',
+      ],
+      ZoeLanguage.both: [
+        'Sorry at malungkot ka. Di mo kailangang mag-explain. Okay lang mag-slow '
+            'down today.',
+        'Mabigat iyan. May tao ka bang pwedeng kausapin today? Pwede kitang '
+            'i-remind na i-message sila.',
+      ],
+    },
+    ZoeSituation.feelingUpset: {
+      ZoeLanguage.english: [
+        "That sounds frustrating. It's okay to be annoyed. Maybe take a minute "
+            'before the next thing.',
+        "Ugh, that's annoying. Want me to remind you to take a short break in "
+            '15 minutes?',
+      ],
+      ZoeLanguage.tagalog: [
+        'Nakakainis nga iyan. Okay lang mainis. Huminga ka muna bago ang susunod.',
+        'Ang hirap niyan. Gusto mo bang paalalahanan kita na magpahinga sandali '
+            'pagkalipas ng 15 minuto?',
+      ],
+      ZoeLanguage.both: [
+        'Nakakainis nga iyan. Okay lang mainis. Take a minute muna bago yung next.',
+        'Hassle nga iyan. Gusto mo i-remind kita mag-short break after 15 minutes?',
+      ],
+    },
+    ZoeSituation.feelingWorried: {
+      ZoeLanguage.english: [
+        "Feeling nervous is normal before something big. Want me to set a reminder "
+            "so you don't have to keep it all in your head?",
+        "That sounds worrying. Let's write it down so it's off your mind. What "
+            'should I remind you about?',
+      ],
+      ZoeLanguage.tagalog: [
+        'Normal lang kabahan bago ang isang malaking bagay. Gusto mo bang mag-set '
+            'ako ng reminder para hindi mo na kailangang isipin palagi?',
+        'Nakakapag-alala nga iyan. Isulat natin para gumaan ang isip mo. Ano ang '
+            'ipapaalala ko?',
+      ],
+      ZoeLanguage.both: [
+        'Normal lang kabahan before something big. Gusto mo mag-set ako ng '
+            'reminder para di mo na kailangang isipin lagi?',
+        "Nakaka-worry nga iyan. Isulat natin para gumaan isip mo. Ano'ng "
+            'ipapaalala ko?',
+      ],
+    },
+    ZoeSituation.feelingHappy: {
+      ZoeLanguage.english: ['Love that! Nice work.', "That's great to hear!"],
+      ZoeLanguage.tagalog: ['Ang saya naman! Ang galing mo.', 'Ang sarap pakinggan niyan!'],
+      ZoeLanguage.both: ['Love that! Ang galing mo.', 'Nice, ang saya niyan!'],
     },
   };
 }
