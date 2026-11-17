@@ -16,6 +16,7 @@ import 'package:zoe_remind/features/settings/screens/chat_history_screen.dart';
 import 'package:zoe_remind/features/settings/screens/developer_screen.dart';
 import 'package:zoe_remind/features/settings/screens/memories_screen.dart';
 import 'package:zoe_remind/features/settings/screens/settings_screen.dart';
+import 'package:zoe_remind/features/statistics/screens/history_statistics_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/task_form_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/tasks_screen.dart';
 
@@ -150,7 +151,20 @@ final appRouter = GoRouter(
       ),
       // Order MUST match ZoeBottomNav: Home, Zoe, Tasks, Notes, Settings
       branches: [
-        StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (c, s) => const HomeScreen())]),
+        StatefulShellBranch(routes: [
+          GoRoute(
+            path: '/home',
+            builder: (c, s) => const HomeScreen(),
+            // "See all" sa Home → /home/history (nasa loob ng shell,
+            // kaya nandoon pa rin ang bottom nav at naka-highlight ang Home).
+            routes: [
+              GoRoute(
+                path: 'history',
+                builder: (c, s) => const HistoryStatisticsScreen(),
+              ),
+            ],
+          ),
+        ]),
         StatefulShellBranch(routes: [GoRoute(path: '/chat', builder: (c, s) => const ZoeChatScreen())]),
         StatefulShellBranch(routes: [GoRoute(path: '/tasks', builder: (c, s) => const TasksScreen())]),
         StatefulShellBranch(routes: [GoRoute(path: '/notes', builder: (c, s) => const NotesScreen())]),
