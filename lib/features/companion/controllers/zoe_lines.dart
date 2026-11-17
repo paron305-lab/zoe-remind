@@ -29,6 +29,32 @@ enum ZoeSituation {
 
   /// Mensaheng tungkol sa pananakit sa sarili (tingnan ang CrisisGuard).
   crisis,
+
+  // ── Home header (bati ayon sa oras) ──────────────────────────────
+  /// Bago mag-12:00.
+  homeMorning,
+
+  /// 12:00 hanggang bago mag-18:00.
+  homeAfternoon,
+
+  /// 18:00 pataas.
+  homeEvening,
+
+  // ── Home banner (katabi ni Zoe avatar) ───────────────────────────
+  /// Walang laman ang araw.
+  homeFreeDay,
+
+  /// May {count} na gagawin ngayong araw. {count} ay numero.
+  homeHasItems,
+
+  /// May gagawin pero wala pang natatapos.
+  homeStartFirst,
+
+  /// Lahat tapos na.
+  homeAllDone,
+
+  /// May natapos na pero may natitira pa. {done} ay numero.
+  homeKeepGoing,
 }
 
 /// Zoe Lines — ang boses ni Zoe (Personality plan, P1 Voice).
@@ -39,6 +65,11 @@ enum ZoeSituation {
 /// Personality: warm, encouraging, maikli at simple, honest. Walang sobrang
 /// emoji, walang baby talk, walang paninisi.
 ///
+/// Dalawang paraan ng pagkuha ng linya:
+///  • [pick]   — random, iniiwasan ang huling 5 nasabi. Para sa chat.
+///  • [stable] — laging ang unang linya. Para sa mga widget na madalas
+///               mag-rebuild (Home header) para hindi kumikislap ang text.
+///
 /// Susunod (P2 Mood): dadagdagan ng mood (happy / gentle / sleepy…) ang pagpili.
 class ZoeLines {
   ZoeLines._();
@@ -48,7 +79,7 @@ class ZoeLines {
   /// Huling 5 linyang ginamit — para hindi paulit-ulit si Zoe.
   static final List<String> _recent = [];
 
-  /// Pumili ng linya. [vars]: {'items': 'Study, Grocery'} → pinapalitan ang {items}.
+  /// Pumili ng linya (random). [vars]: {'items': 'Study, Grocery'} → pinapalitan ang {items}.
   static String pick(
     ZoeLanguage lang,
     ZoeSituation situation, [
@@ -64,11 +95,49 @@ class ZoeLines {
     _recent.add(chosen);
     if (_recent.length > 5) _recent.removeAt(0);
 
-    var line = chosen;
+    return _fill(chosen, vars);
+  }
+
+  /// Laging ang unang linya — walang random, hindi binabago ang [_recent].
+  /// Ginagamit ng Home header para pare-pareho ang text kahit mag-rebuild.
+  static String stable(
+    ZoeLanguage lang,
+    ZoeSituation situation, [
+    Map<String, String> vars = const {},
+  ]) {
+    final options = _lines[situation]?[lang] ?? const <String>[];
+    if (options.isEmpty) return '';
+    return _fill(options.first, vars);
+  }
+
+  /// Pumili ng bati sa Home ayon sa oras (0–23).
+  static ZoeSituation homeGreetingFor(int hour) {
+    if (hour < 12) return ZoeSituation.homeMorning;
+    if (hour < 18) return ZoeSituation.homeAfternoon;
+    return ZoeSituation.homeEvening;
+  }
+
+  /// Pumili ng banner line sa Home ayon sa bilang ng gagawin at natapos.
+  static ZoeSituation homeBannerFor({required int total, required int done}) {
+    if (total == 0) return ZoeSituation.homeFreeDay;
+    if (done == 0) return ZoeSituation.homeStartFirst;
+    if (done >= total) return ZoeSituation.homeAllDone;
+    return ZoeSituation.homeKeepGoing;
+  }
+
+  /// Para sa test: may linya ba ang [situation] sa lahat ng language?
+  static bool hasAllLanguages(ZoeSituation situation) {
+    final byLang = _lines[situation];
+    if (byLang == null) return false;
+    return ZoeLanguage.values.every((l) => (byLang[l] ?? const []).isNotEmpty);
+  }
+
+  static String _fill(String line, Map<String, String> vars) {
+    var out = line;
     for (final e in vars.entries) {
-      line = line.replaceAll('{${e.key}}', e.value);
+      out = out.replaceAll('{${e.key}}', e.value);
     }
-    return line;
+    return out;
   }
 
   static const _lines = <ZoeSituation, Map<ZoeLanguage, List<String>>>{
@@ -245,6 +314,53 @@ class ZoeLines {
             'Kung nasa panganib ka ngayon, tumawag sa {emergency} o lumapit sa taong '
             'pinagkakatiwalaan mo.',
       ],
+    },
+
+    // ── Home header: bati ayon sa oras ───────────────────────────────
+    // Unang linya ang ginagamit ng [stable]; ang iba ay para sa P2 Mood.
+    ZoeSituation.homeMorning: {
+      ZoeLanguage.english: ['Good morning ☀️'],
+      ZoeLanguage.tagalog: ['Magandang umaga ☀️'],
+      ZoeLanguage.both: ['Good morning ☀️'],
+    },
+    ZoeSituation.homeAfternoon: {
+      ZoeLanguage.english: ['Good afternoon 🌤️'],
+      ZoeLanguage.tagalog: ['Magandang hapon 🌤️'],
+      ZoeLanguage.both: ['Good afternoon 🌤️'],
+    },
+    ZoeSituation.homeEvening: {
+      ZoeLanguage.english: ['Good evening 🌙'],
+      ZoeLanguage.tagalog: ['Magandang gabi 🌙'],
+      ZoeLanguage.both: ['Good evening 🌙'],
+    },
+
+    // ── Home banner ──────────────────────────────────────────────────
+    ZoeSituation.homeFreeDay: {
+      ZoeLanguage.english: ['Free day today!'],
+      ZoeLanguage.tagalog: ['Libre ang araw mo ngayon!'],
+      ZoeLanguage.both: ['Free day today!'],
+    },
+    // {count} = bilang ng gagawin. Sa English, {s} = '' o 's'.
+    ZoeSituation.homeHasItems: {
+      ZoeLanguage.english: ['You have {count} thing{s} today!'],
+      ZoeLanguage.tagalog: ['May {count} kang gagawin ngayong araw!'],
+      ZoeLanguage.both: ['May {count} kang gagawin today!'],
+    },
+    ZoeSituation.homeStartFirst: {
+      ZoeLanguage.english: ["Let's start the first one 💪"],
+      ZoeLanguage.tagalog: ['Simulan na natin ang una 💪'],
+      ZoeLanguage.both: ["Let's start sa una 💪"],
+    },
+    ZoeSituation.homeAllDone: {
+      ZoeLanguage.english: ['All done — great job! 🎉'],
+      ZoeLanguage.tagalog: ['Tapos na lahat — ang galing mo! 🎉'],
+      ZoeLanguage.both: ['All done — ang galing mo! 🎉'],
+    },
+    // {done} = bilang ng natapos.
+    ZoeSituation.homeKeepGoing: {
+      ZoeLanguage.english: ['{done} done already — keep going 💪'],
+      ZoeLanguage.tagalog: ['{done} na ang tapos — tuloy lang 💪'],
+      ZoeLanguage.both: ['{done} na ang tapos — keep going 💪'],
     },
   };
 }

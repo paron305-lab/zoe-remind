@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:zoe_remind/core/constants/zoe_language.dart';
+import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_avatar.dart';
 
@@ -11,6 +13,12 @@ class HomeHeader extends StatelessWidget {
   /// Naka-ON ba ang reminders (green bell) o OFF (gray bell).
   final bool remindersOn;
 
+  /// Language ni Zoe (galing sa Settings). Dito nakabase ang bati at banner.
+  final ZoeLanguage language;
+
+  /// Para sa test: pwedeng ipasa ang oras imbes na DateTime.now().
+  final DateTime? now;
+
   const HomeHeader({
     super.key,
     required this.userName,
@@ -18,25 +26,35 @@ class HomeHeader extends StatelessWidget {
     required this.done,
     this.onBellTap,
     this.remindersOn = true,
+    this.language = ZoeLanguage.both,
+    this.now,
   });
 
+  /// "Good morning ☀️" / "Magandang umaga ☀️" — galing sa ZoeLines.
   String _greeting() {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good morning ☀️';
-    if (h < 18) return 'Good afternoon 🌤️';
-    return 'Good evening 🌙';
+    final hour = (now ?? DateTime.now()).hour;
+    return ZoeLines.stable(language, ZoeLines.homeGreetingFor(hour));
   }
 
+  /// Pangalawang linya sa banner: "Free day today!" / "You have 3 things today!"
   String _title() {
-    if (total == 0) return 'Free day today!';
-    return 'You have $total thing${total == 1 ? '' : 's'} today!';
+    if (total == 0) return ZoeLines.stable(language, ZoeSituation.homeFreeDay);
+    return ZoeLines.stable(language, ZoeSituation.homeHasItems, {
+      'count': '$total',
+      's': total == 1 ? '' : 's',
+    });
   }
 
+  /// Subtitle sa banner, ayon sa progress ng araw.
   String _subtitle() {
-    if (total == 0) return 'Tap + to plan something.';
-    if (done == 0) return "Let's start the first one 💪";
-    if (done == total) return 'All done — great job! 🎉';
-    return '$done done already — keep going 💪';
+    if (total == 0) {
+      // Walang gagawin — maikling hint lang, hindi ito boses ni Zoe.
+      return language == ZoeLanguage.tagalog
+          ? 'I-tap ang + para magplano.'
+          : 'Tap + to plan something.';
+    }
+    final situation = ZoeLines.homeBannerFor(total: total, done: done);
+    return ZoeLines.stable(language, situation, {'done': '$done'});
   }
 
   @override

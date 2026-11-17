@@ -316,6 +316,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   done: done,
                   remindersOn: _remindersOn,
                   onBellTap: _toggleReminders,
+                  language: _language,
                 ),
                 // iaangat ng 44px para pumatong ang board sa header
                 Transform.translate(
