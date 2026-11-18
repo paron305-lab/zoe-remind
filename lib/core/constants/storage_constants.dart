@@ -13,4 +13,5 @@ class StorageConstants {
   static const conversationsTable = 'ai_conversations';
   static const messagesTable = 'ai_messages';
   static const memoriesTable = 'memories';
+  static const moodTable = 'zoe_mood';
 }

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 import 'package:zoe_remind/features/settings/screens/brain_test_screen.dart';
@@ -185,12 +187,91 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
                   label: const Text('Buksan ang Brain Test'),
                 ),
               ),
+              const SizedBox(height: 24),
+
+              _section('6. Mood ni Zoe'),
+              Text(
+                'Naka-save sa phone. Isara at buksan ulit ang app — dapat pareho pa rin.',
+                style: TextStyle(fontFamily: 'Poppins', color: HomeColors.inkSoft),
+              ),
+              const SizedBox(height: 8),
+              _moodCard(),
             ],
           ),
         ),
       ),
     );
   }
+
+  static String _moodEmoji(MoodState s) => switch (s) {
+        MoodState.content => '🙂',
+        MoodState.sleepy => '😴',
+        MoodState.happy => '😊',
+        MoodState.proud => '🥳',
+        MoodState.focused => '🤔',
+        MoodState.gentle => '🫶',
+        MoodState.sorry => '🙏',
+      };
+
+  /// Mood ngayon + huling mga event + test buttons.
+  Widget _moodCard() {
+    final c = MoodController.instance;
+    return ValueListenableBuilder<ZoeMood>(
+      valueListenable: c.mood,
+      builder: (context, m, _) {
+        final celebrated = m.celebrated.isEmpty ? '—' : (m.celebrated.toList()..sort()).join(', ');
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_moodEmoji(m.state)}  ${m.state.name}  ·  intensity ${m.intensity}',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _lavender),
+                ),
+                const SizedBox(height: 4),
+                Text('reason: ${m.reason.isEmpty ? '—' : m.reason}', style: const TextStyle(fontSize: 13)),
+                Text('since: ${_hm(m.since)}', style: const TextStyle(fontSize: 13)),
+                Text('na-celebrate ngayon: $celebrated', style: const TextStyle(fontSize: 13)),
+                if (!c.isStarted)
+                  const Text('⚠️ Hindi pa nagsisimula ang MoodController',
+                      style: TextStyle(fontSize: 13, color: _coral)),
+                const SizedBox(height: 10),
+                const Text('Huling events:', style: TextStyle(fontWeight: FontWeight.w700)),
+                if (c.recent.isEmpty) const Text('wala pa', style: TextStyle(fontSize: 13)),
+                for (final line in c.recent.take(6)) Text(line, style: const TextStyle(fontSize: 13)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    _moodButton('Natapos', const TaskCompleted()),
+                    _moodButton('Na-miss', const ReminderMissed()),
+                    _moodButton('Pagod ako', const UserFeelsDown()),
+                    _moodButton('AI error', const ZoeFailed(ZoeFailure.inference)),
+                    OutlinedButton(
+                      onPressed: () => c.refresh(),
+                      child: const Text('Silipin ang araw'),
+                    ),
+                    TextButton(
+                      onPressed: () => c.reset(),
+                      child: const Text('Reset mood', style: TextStyle(color: _coral)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _moodButton(String label, ZoeEvent event) => OutlinedButton(
+        onPressed: () => MoodController.instance.add(event),
+        child: Text(label),
+      );
 
   /// Itago ulit ang Developer row sa Settings.
   Future<void> _hide() async {

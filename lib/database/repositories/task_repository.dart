@@ -1,6 +1,7 @@
 import 'package:zoe_remind/core/constants/storage_constants.dart';
 import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/database/models/task.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 
 /// Thrown when someone tries to change a task that is already history 🔒.
 class TaskLockedException implements Exception {
@@ -31,7 +32,9 @@ class TaskRepository {
       ..remove('id')
       ..remove('missed_at')
       ..['updated_at'] = now;
-    return db.insert(_table, row);
+    final id = await db.insert(_table, row);
+    MoodController.instance.saved(); // mood: tapos na ang "sorry" kung meron
+    return id;
   }
 
   /// Saves every editable field of [task]. Status / completion are
@@ -83,12 +86,14 @@ class TaskRepository {
   /// as "finished" in memory search. History 🔒 tasks can't be unticked.
   Future<void> setDone(int id, bool done) async {
     final db = await ZoeDatabase.instance.database;
+    var changed = false;
     await db.transaction((txn) async {
       final rows = await txn.query(_table, where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isEmpty) return;
       final task = Task.fromMap(rows.first);
       if (task.isLockedAt(DateTime.now())) throw const TaskLockedException();
       if (task.isDone == done) return; // nothing to change
+      changed = true;
       final now = _now();
 
       await txn.update(
@@ -118,6 +123,13 @@ class TaskRepository {
         );
       }
     });
+    // Mood ni Zoe: may natapos → happy (+ check kung tapos lahat / streak).
+    // Undo → silipin lang ulit ang araw.
+    if (changed && done) {
+      MoodController.instance.taskDone();
+    } else if (changed) {
+      MoodController.instance.refresh();
+    }
   }
 
   /// Deletes the task. History 🔒 tasks can't be deleted.

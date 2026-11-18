@@ -25,7 +25,8 @@ class ZoeDatabase {
   ///     ai_conversations + ai_messages (Zoe Chat history), memories
   /// v10: model_state.tier / model_name, dalawang row na ang pwede
   ///      (id 1 = Zoe Lite, id 2 = Zoe Plus)
-  static const _version = 10;
+  /// v11: zoe_mood (mood ni Zoe, para pareho pa rin pagbukas ulit ng app)
+  static const _version = 11;
 
   Future<Database>? _opening;
 
@@ -381,6 +382,28 @@ class ZoeDatabase {
         source TEXT NOT NULL DEFAULT 'chat',
         importance INTEGER NOT NULL DEFAULT 3,
         created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // Mood ni Zoe (Personality plan, P2b). Isang row lang (id 1).
+    // Bagong table lang, kaya sapat na ang IF NOT EXISTS para sa v10 → v11.
+    // celebrated = "all_done,streak:7" (comma-separated), para sa
+    //   isang-beses-lang-kada-araw na celebration.
+    // seen_day / seen_missed / seen_overdue = ilang na-miss / overdue na ang
+    //   "nakita" ni Zoe ngayong araw (para hindi paulit-ulit mag-react).
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.moodTable} (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        state TEXT NOT NULL,
+        intensity INTEGER NOT NULL DEFAULT 0,
+        since TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        celebrated TEXT NOT NULL DEFAULT '',
+        celebrated_on TEXT NOT NULL DEFAULT '',
+        seen_day TEXT NOT NULL DEFAULT '',
+        seen_missed INTEGER NOT NULL DEFAULT 0,
+        seen_overdue INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL
       )
     ''');

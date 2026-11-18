@@ -4,6 +4,7 @@ import 'package:zoe_remind/app/app.dart';
 import 'package:zoe_remind/app/router.dart';
 import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/supabase/supabase_service.dart';
 
@@ -25,4 +26,7 @@ Future<void> main() async {
   final alarms = ReminderAlarmService.instance;
   alarms.startListening(); // nagri-ring -> bubuksan ang ringing screen
   alarms.syncAll(); // lagyan ng alarm ang lahat ng pending reminders
+
+  // Mood ni Zoe: basahin ang naka-save + makinig sa app (Personality P2b).
+  MoodController.instance.start();
 }

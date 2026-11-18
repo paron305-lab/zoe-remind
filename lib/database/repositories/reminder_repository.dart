@@ -5,6 +5,7 @@ import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/models/reminder_occurrence.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 
 /// The only place that reads/writes the reminders table
 /// (and the reminder rows of completion_history + reminder_occurrences).
@@ -22,7 +23,9 @@ class ReminderRepository {
 
   Future<int> add(Reminder r) async {
     final db = await ZoeDatabase.instance.database;
-    return db.insert(_table, r.toMap()..remove('id'));
+    final id = await db.insert(_table, r.toMap()..remove('id'));
+    MoodController.instance.saved(); // mood: tapos na ang "sorry" kung meron
+    return id;
   }
 
   Future<Reminder?> getById(int id) async {
@@ -80,10 +83,12 @@ class ReminderRepository {
   /// Undo removes those rows, so a mis-tap doesn't count.
   Future<void> setDoneOn(int id, DateTime day, bool done) async {
     final db = await ZoeDatabase.instance.database;
+    var found = false;
     await db.transaction((txn) async {
       final rows = await txn.query(_table,
           columns: ['title', 'time'], where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isEmpty) return;
+      found = true;
       final now = DateTime.now().toIso8601String();
       final dayKey = ZoeDate.key(day);
 
@@ -126,6 +131,13 @@ class ReminderRepository {
         );
       }
     });
+    // Mood ni Zoe: may natapos → happy (+ first reminder / tapos lahat / streak).
+    // Undo → silipin lang ulit ang araw.
+    if (found && done) {
+      MoodController.instance.reminderDone();
+    } else if (found) {
+      MoodController.instance.refresh();
+    }
   }
 
   /// Dismiss sa ringing screen: hindi done (walang history log),
