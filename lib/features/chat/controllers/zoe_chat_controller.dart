@@ -16,6 +16,8 @@ import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/controllers/chat_preview_brain.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 
 /// Estado ng header: Ready / Thinking… / No brain yet / Downloading.
@@ -47,6 +49,9 @@ class ZoeChatController extends ChangeNotifier {
   int? _conversationId;
   bool _writingHistory = false;
   bool _disposed = false;
+
+  /// Nag-error ang huling sagot → "sorry" si Zoe hanggang sa susunod na maayos.
+  bool _failedBefore = false;
 
   // ───────────────────────── Lifecycle ─────────────────────────
 
@@ -168,8 +173,17 @@ class ZoeChatController extends ChangeNotifier {
         Future<void>.delayed(const Duration(milliseconds: 700)),
       ]);
       reply = results.first as List<ChatEntry>;
+      if (_failedBefore) {
+        // Nakasagot na ulit nang maayos (ang sagot na ito ay "Sorry kanina…"
+        // pa kung bati) → tapos na ang sorry mood.
+        _failedBefore = false;
+        MoodController.instance.add(const ActionSucceeded());
+      }
     } catch (e) {
       debugPrint('Zoe chat reply failed: $e');
+      // Kasalanan ni Zoe ito → "sorry" mood. Matatapos sa susunod na na-save.
+      _failedBefore = true;
+      MoodController.instance.add(const ZoeFailed(ZoeFailure.inference));
       reply = [
         ErrorEntry(
           text: t("Sorry, something went wrong. Can you try again?",

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
+import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/home/widgets/zoe_avatar.dart';
 
@@ -8,6 +9,14 @@ class HomeHeader extends StatelessWidget {
   final String userName;
   final int total;
   final int done;
+
+  /// Ilang reminder ngayong araw ang Missed (para sa gentle na banner).
+  final int missed;
+
+  /// Mood ni Zoe ngayon (MoodNow). Dito nakabase ang tono ng banner:
+  /// gentle kapag may na-miss, proud kapag tapos lahat, tahimik sa gabi.
+  final MoodState mood;
+
   final VoidCallback? onBellTap;
 
   /// Naka-ON ba ang reminders (green bell) o OFF (gray bell).
@@ -24,6 +33,8 @@ class HomeHeader extends StatelessWidget {
     required this.userName,
     required this.total,
     required this.done,
+    this.missed = 0,
+    this.mood = MoodState.content,
     this.onBellTap,
     this.remindersOn = true,
     this.language = ZoeLanguage.both,
@@ -45,15 +56,21 @@ class HomeHeader extends StatelessWidget {
     });
   }
 
-  /// Subtitle sa banner, ayon sa progress ng araw.
+  /// Subtitle sa banner, ayon sa progress ng araw at sa mood ni Zoe.
   String _subtitle() {
-    if (total == 0) {
+    final situation = ZoeLines.homeBannerFor(
+      total: total,
+      done: done,
+      missed: missed,
+      mood: mood,
+    );
+    if (situation == ZoeSituation.homeFreeDay) {
       // Walang gagawin — maikling hint lang, hindi ito boses ni Zoe.
       return language == ZoeLanguage.tagalog
           ? 'I-tap ang + para magplano.'
           : 'Tap + to plan something.';
     }
-    final situation = ZoeLines.homeBannerFor(total: total, done: done);
+    // stable = laging parehong linya kaya hindi kumikislap kapag nag-rebuild.
     return ZoeLines.stable(language, situation, {'done': '$done'});
   }
 

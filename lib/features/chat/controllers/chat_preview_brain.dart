@@ -12,17 +12,32 @@ import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_now.dart';
+import 'package:zoe_remind/features/companion/controllers/tone_detector.dart';
 import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
+import 'package:zoe_remind/features/companion/models/mood_state.dart';
+import 'package:zoe_remind/features/companion/models/user_tone.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
 ///   0. CrisisGuard (code) → laging una; hindi dumadaan kay Qwen kailanman.
-///   1. IntentRules (code) → agad ang sagot, gumagana kahit walang model.
-///   2. Walang tumamang rule? → tinatanong si Qwen kung anong INTENT (label lang).
-///   3. Date, time, title → laging code ang kumukuha (hindi si Qwen).
-///   4. Lahat ng write    → confirmation card; walang nase-save hangga't
+///   1. ToneDetector (code) → binabasa ang nararamdaman ng user; ipinapasa
+///                            sa MoodController (pagod → gentle si Zoe).
+///   2. IntentRules (code) → agad ang sagot, gumagana kahit walang model.
+///   3. Walang tumamang rule? → tinatanong si Qwen kung anong INTENT (label lang).
+///   4. Date, time, title → laging code ang kumukuha (hindi si Qwen).
+///   5. Lahat ng write    → confirmation card; walang nase-save hangga't
 ///                          hindi pinipindot ng user ang Accept.
-///   5. Ang mga salita ni Zoe ay galing sa ZoeLines (code), hindi kay Qwen.
+///   6. Ang mga salita ni Zoe ay galing sa ZoeLines (code), hindi kay Qwen,
+///      at pinipili ayon sa mood ni Zoe (gentle / proud / sleepy…).
+///
+/// Nararamdaman (2c):
+///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
+///   "hi zoe, stressed ako"      → feelingStressed (hindi na bati)
+///   "stressed na ako, remind me bukas 8am mag-review"
+///                               → "Sige, isa-isa lang tayo." + reminder card
+///   "yay natapos ko lahat!"     → masaya si Zoe (UserPositive)
 ///
 /// Subukan (may keyword → code):
 ///   "Zoe, remind me tomorrow at 7 PM to review my thesis"
@@ -44,10 +59,14 @@ class ChatPreviewBrain {
     TaskRepository? tasks,
     NoteRepository? notes,
     IntentClassifier? classifier,
+    MoodState Function()? mood,
+    void Function(ZoeEvent event)? onMoodEvent,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
         _notes = notes ?? NoteRepository(),
-        _classifier = classifier ?? IntentClassifier();
+        _classifier = classifier ?? IntentClassifier(),
+        _moodOf = mood ?? (() => MoodNow.current),
+        _report = onMoodEvent ?? MoodController.instance.add;
 
   /// true = gumagana ang chat (keywords) kahit walang naka-download na model.
   static const enabled = true;
@@ -57,7 +76,16 @@ class ChatPreviewBrain {
   final NoteRepository _notes;
   final IntentClassifier _classifier;
 
+  /// Mood ni Zoe ngayon (para sa salita). Sa test: pwedeng ipasa.
+  final MoodState Function() _moodOf;
+
+  /// Saan ipapasa ang event (UserFeelsDown, UserPositive). Default: MoodController.
+  final void Function(ZoeEvent event) _report;
+
   ZoeLanguage _lang = ZoeLanguage.both;
+
+  /// Mood na gagamitin sa sagot na ito (kinukuha isang beses kada reply).
+  MoodState _mood = MoodState.content;
 
   /// true = nasimulan na ang pag-load kay Qwen sa background.
   bool _warmStarted = false;
@@ -65,17 +93,27 @@ class ChatPreviewBrain {
   /// English → [en], Tagalog / Both → [tl]. (Para sa maliliit na label lang.)
   String _t(String en, String tl) => _lang == ZoeLanguage.english ? en : tl;
 
-  /// Linya ni Zoe mula sa ZoeLines, ayon sa napiling language.
+  /// Linya ni Zoe mula sa ZoeLines, ayon sa language at mood ni Zoe.
   String _say(ZoeSituation s, [Map<String, String> vars = const {}]) =>
-      ZoeLines.pick(_lang, s, vars);
+      ZoeLines.pickFor(_lang, s, _mood, vars);
+
+  /// Ano ang nararamdaman ng user sa mensaheng ito?
+  /// Ang "happy" sa tanong ("nice ba yung movie?") ay hindi binibilang.
+  static UserTone toneOf(String text) {
+    final tone = ToneDetector.detect(text).tone;
+    if (tone == UserTone.happy && text.trim().endsWith('?')) return UserTone.neutral;
+    return tone;
+  }
 
   Future<List<ChatEntry>> reply(String text, ZoeLanguage lang) async {
     _lang = lang;
+    _mood = _moodOf();
     final lower = text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
     bool has(List<String> words) => words.any(lower.contains);
 
     // Laging una: pananakit sa sarili → nakahandang sagot + hotline.
-    // Walang card, walang Qwen, walang ibang rule na makakasapaw.
+    // Walang card, walang Qwen, walang ibang rule na makakasapaw,
+    // at hindi ito ginagawang mood event.
     if (CrisisGuard.matches(text)) {
       return [
         TextEntry(
@@ -87,6 +125,16 @@ class ChatPreviewBrain {
 
     if (lower == 'test error') throw StateError('UI preview error');
 
+    // Nararamdaman ng user → ipaalam sa MoodController (pagod → gentle si Zoe).
+    // Hindi sine-save ang tone mismo; ang mood lang ni Zoe ang nagbabago.
+    final tone = toneOf(text);
+    final event = ToneDetector.toMoodEvent(tone);
+    if (event != null) {
+      _report(event);
+      // Ang SAGOT na ito ay ayon na sa bagong mood (hindi na hinihintay ang controller).
+      if (tone.isDown) _mood = MoodState.gentle;
+    }
+
     // Math → code ang sumasagot (laging tama), hindi si Qwen.
     final math = _math(lower);
     if (math != null) return [TextEntry(fromZoe: true, text: math)];
@@ -96,15 +144,41 @@ class ChatPreviewBrain {
       return [TextEntry(fromZoe: true, text: _say(ZoeSituation.stopAlarmHelp))];
     }
 
-    // 1) Code muna (agad). 2) Kung hindi alam ng code → si Qwen (label lang).
-    var intent = IntentRules.match(lower);
+    // Code muna (agad). Kung hindi alam ng code → si Qwen sa [_answer].
+    final intent = IntentRules.match(lower);
+
+    // "salamat" / "thank you" (kahit may "ang galing mo") → pasasalamat.
+    if (intent == ZoeIntent.unknown && has(['salamat', 'thank'])) {
+      if (event == null) _report(const UserPositive()); // isang event lang
+      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
+    }
+
+    // "pagod na ako", "hi zoe, stressed ako" → script para sa nararamdaman.
+    // (Kapag may utos — reminder, task, listahan — ang utos pa rin ang sinusunod.)
+    final feeling = ZoeLines.situationForTone(tone);
+    if (feeling != null && (intent == ZoeIntent.unknown || intent == ZoeIntent.greeting)) {
+      return [TextEntry(fromZoe: true, text: _say(feeling))];
+    }
+
+    // May utos pero pagod / stressed → maikling "isa-isa lang tayo" bago ang sagot.
+    final answer = await _answer(intent, text, lower);
+    if (tone.isDown) {
+      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...answer];
+    }
+    return answer;
+  }
+
+  /// Sagot ayon sa intent (code muna; si Qwen kapag hindi alam ng code).
+  Future<List<ChatEntry>> _answer(ZoeIntent codeIntent, String text, String lower) async {
+    bool has(List<String> words) => words.any(lower.contains);
+    var intent = codeIntent;
     var askedQwen = false;
     if (intent == ZoeIntent.unknown) {
-      if (has(['salamat', 'thank'])) {
-        return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
-      }
-      // "pagod na ako" → maikling malasakit, agad (hindi na kay Qwen).
+      // Hindi nabasa ng ToneDetector pero mukhang nagkukuwento ("nahihirapan ako")
+      // → maikling malasakit, agad (hindi na kay Qwen).
       if (IntentRules.isFeeling(lower)) {
+        _report(const UserFeelsDown());
+        _mood = MoodState.gentle;
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.comfort))];
       }
       askedQwen = true;
@@ -354,10 +428,9 @@ class ChatPreviewBrain {
           ? _say(ZoeSituation.todayFree)
           : _say(ZoeSituation.todayList, {'items': items});
     } else {
-      // Ililipat sa ZoeLines kasabay ng P2 Mood.
       text = names.isEmpty
-          ? _t('Nothing scheduled on $label.', 'Wala kang naka-schedule sa $label.')
-          : _t('On $label you have: $items.', 'Sa $label, meron kang: $items.');
+          ? _say(ZoeSituation.dayFree, {'day': label})
+          : _say(ZoeSituation.dayList, {'day': label, 'items': items});
     }
 
     return AnswerEntry(

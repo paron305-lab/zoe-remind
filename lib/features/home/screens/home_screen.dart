@@ -10,6 +10,9 @@ import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/statistics_repository.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_now.dart';
+import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/home/models/home_item.dart';
 import 'package:zoe_remind/features/home/widgets/home_header.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
@@ -43,6 +46,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Bawat minuto: i-refresh para maging "Missed" / "Done ✓" ang lumipas na.
   Timer? _tick;
+
+  /// Ilang Missed ngayong araw noong huling load — para malaman kung may bago.
+  int _lastMissed = 0;
 
   @override
   void initState() {
@@ -146,11 +152,17 @@ class _HomeScreenState extends State<HomeScreen> {
       final upcoming = await _reminders.getUpcoming(days: 30);
       final streak = await StatisticsRepository().dayStreak(now: now);
       if (!mounted) return;
+      final todayItems = [
+        for (final r in todayList) _toItem(r, today, now: now, activeAlarms: active),
+      ];
+      // May bagong Missed → sabihan agad si Zoe (gentle), hindi na hintayin
+      // ang 5-minutong check ng MoodController.
+      final missed = _missedCount(todayItems);
+      if (missed > _lastMissed) MoodController.instance.refresh();
+      _lastMissed = missed;
       setState(() {
         _streak = streak;
-        _today = [
-          for (final r in todayList) _toItem(r, today, now: now, activeAlarms: active),
-        ];
+        _today = todayItems;
         _upcoming = [
           for (final (day, r) in upcoming)
             _toItem(r, day, showDate: true, now: now, activeAlarms: active),
@@ -162,6 +174,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  static int _missedCount(List<HomeItem> items) =>
+      items.where((i) => i.status == ReminderStatus.missed).length;
 
   /// Checkbox — gumagana lang kapag HINDI PA oras (check nang maaga / uncheck).
   Future<void> _toggle(HomeItem item) async {
@@ -310,13 +325,20 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.only(bottom: 100),
             child: Column(
               children: [
-                HomeHeader(
-                  userName: _userName,
-                  total: _today.length,
-                  done: done,
-                  remindersOn: _remindersOn,
-                  onBellTap: _toggleReminders,
-                  language: _language,
+                // Nakikinig sa mood ni Zoe: nagbabago ang banner kapag may
+                // natapos, na-miss, o sinabi mo sa chat na pagod ka.
+                ValueListenableBuilder<ZoeMood>(
+                  valueListenable: MoodController.instance.mood,
+                  builder: (context, mood, _) => HomeHeader(
+                    userName: _userName,
+                    total: _today.length,
+                    done: done,
+                    missed: _missedCount(_today),
+                    mood: MoodNow.of(mood, DateTime.now()),
+                    remindersOn: _remindersOn,
+                    onBellTap: _toggleReminders,
+                    language: _language,
+                  ),
                 ),
                 // iaangat ng 44px para pumatong ang board sa header
                 Transform.translate(

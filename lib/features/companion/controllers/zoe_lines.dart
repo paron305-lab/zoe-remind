@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:zoe_remind/core/constants/zoe_language.dart';
+import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 
 /// Mga sitwasyon kung saan may sinasabi si Zoe.
@@ -21,6 +22,16 @@ enum ZoeSituation {
   noteFound,
   noteNotFound,
   mathDivideByZero,
+
+  /// Ibang araw (bukas, "sa Sabado") na walang laman. {day} = "Sat, Nov 21".
+  dayFree,
+
+  /// Ibang araw na may laman. {day}, {items}.
+  dayList,
+
+  /// Pagod / stressed ang user PERO may inuutos (reminder, task, listahan).
+  /// Maikling linya bago ang card — hindi pinapalitan ang sagot.
+  feelingAck,
 
   /// "patayin mo ang alarm" — hindi pa kaya mula sa chat.
   stopAlarmHelp,
@@ -57,6 +68,18 @@ enum ZoeSituation {
   /// May natapos na pero may natitira pa. {done} ay numero.
   homeKeepGoing,
 
+  /// Mood gentle + may na-miss ngayong araw. "Okay lang, isa-isa lang tayo."
+  homeGentleMissed,
+
+  /// Mood gentle dahil sa ibang dahilan (hal. sinabi ng user na pagod siya).
+  homeGentle,
+
+  /// Mood proud + tapos lahat ngayong araw.
+  homeProud,
+
+  /// Gabi (mood sleepy) — tahimik, walang push.
+  homeNight,
+
   // ── Sagot ayon sa nararamdaman ng user (ToneDetector) ────────────
   /// "pagod na ako", "I'm so tired", "puyat ako"
   feelingTired,
@@ -90,7 +113,9 @@ enum ZoeSituation {
 ///  • [stable] — laging ang unang linya. Para sa mga widget na madalas
 ///               mag-rebuild (Home header) para hindi kumikislap ang text.
 ///
-/// Susunod (P2 Mood): dadagdagan ng mood (happy / gentle / sleepy…) ang pagpili.
+/// Mood (2c): [pickFor] / [stableFor] ay tumitingin muna sa mood ni Zoe
+/// (gentle, proud, sleepy…). Kapag walang espesyal na linya para sa mood na
+/// iyon, ang karaniwang linya ang ginagamit — kaya hindi kailanman blangko.
 class ZoeLines {
   ZoeLines._();
 
@@ -104,8 +129,18 @@ class ZoeLines {
     ZoeLanguage lang,
     ZoeSituation situation, [
     Map<String, String> vars = const {},
+  ]) =>
+      pickFor(lang, situation, MoodState.content, vars);
+
+  /// Gaya ng [pick], pero ayon sa [mood] ni Zoe.
+  /// Hal. gentle + greeting → "Hi. Nandito lang ako — ano'ng kailangan mo?"
+  static String pickFor(
+    ZoeLanguage lang,
+    ZoeSituation situation,
+    MoodState mood, [
+    Map<String, String> vars = const {},
   ]) {
-    final options = _lines[situation]?[lang] ?? const <String>[];
+    final options = _options(lang, situation, mood);
     if (options.isEmpty) return '';
 
     final fresh = options.where((o) => !_recent.contains(o)).toList();
@@ -124,10 +159,26 @@ class ZoeLines {
     ZoeLanguage lang,
     ZoeSituation situation, [
     Map<String, String> vars = const {},
+  ]) =>
+      stableFor(lang, situation, MoodState.content, vars);
+
+  /// Gaya ng [stable], pero ayon sa [mood] ni Zoe.
+  static String stableFor(
+    ZoeLanguage lang,
+    ZoeSituation situation,
+    MoodState mood, [
+    Map<String, String> vars = const {},
   ]) {
-    final options = _lines[situation]?[lang] ?? const <String>[];
+    final options = _options(lang, situation, mood);
     if (options.isEmpty) return '';
     return _fill(options.first, vars);
+  }
+
+  /// Linya para sa mood kung meron; kung wala, ang karaniwang linya.
+  static List<String> _options(ZoeLanguage lang, ZoeSituation situation, MoodState mood) {
+    final byMood = _moodLines[situation]?[mood]?[lang];
+    if (byMood != null && byMood.isNotEmpty) return byMood;
+    return _lines[situation]?[lang] ?? const <String>[];
   }
 
   /// Pumili ng bati sa Home ayon sa oras (0–23).
@@ -137,11 +188,30 @@ class ZoeLines {
     return ZoeSituation.homeEvening;
   }
 
-  /// Pumili ng banner line sa Home ayon sa bilang ng gagawin at natapos.
-  static ZoeSituation homeBannerFor({required int total, required int done}) {
+  /// Pumili ng banner line sa Home ayon sa nangyari sa araw at sa mood ni Zoe.
+  ///
+  ///  • Gabi (sleepy)          → tahimik: "Gabi na — magpahinga ka…"
+  ///  • Walang laman           → homeFreeDay
+  ///  • Tapos lahat            → proud? "Proud ako sa'yo!" : "Tapos na lahat"
+  ///  • Gentle + may na-miss   → "Okay lang, isa-isa lang tayo"
+  ///  • Gentle (pagod ang user)→ "Dahan-dahan lang…"
+  ///  • Wala pang tapos        → "Simulan na natin ang una"
+  ///  • May tapos na           → "{done} na ang tapos — tuloy lang"
+  static ZoeSituation homeBannerFor({
+    required int total,
+    required int done,
+    int missed = 0,
+    MoodState mood = MoodState.content,
+  }) {
+    if (mood == MoodState.sleepy) return ZoeSituation.homeNight;
     if (total == 0) return ZoeSituation.homeFreeDay;
+    if (done >= total) {
+      return mood == MoodState.proud ? ZoeSituation.homeProud : ZoeSituation.homeAllDone;
+    }
+    if (mood == MoodState.gentle) {
+      return missed > 0 ? ZoeSituation.homeGentleMissed : ZoeSituation.homeGentle;
+    }
     if (done == 0) return ZoeSituation.homeStartFirst;
-    if (done >= total) return ZoeSituation.homeAllDone;
     return ZoeSituation.homeKeepGoing;
   }
 
@@ -159,6 +229,24 @@ class ZoeLines {
   /// Para sa test: may linya ba ang [situation] sa lahat ng language?
   static bool hasAllLanguages(ZoeSituation situation) {
     final byLang = _lines[situation];
+    if (byLang == null) return false;
+    return ZoeLanguage.values.every((l) => (byLang[l] ?? const []).isNotEmpty);
+  }
+
+  /// Para sa test: lahat ng posibleng linya (hindi pa napapalitan ang {vars}).
+  static List<String> optionsFor(ZoeLanguage lang, ZoeSituation situation,
+          [MoodState mood = MoodState.content]) =>
+      List.unmodifiable(_options(lang, situation, mood));
+
+  /// Lahat ng (situation, mood) na may sariling linya — para sa test.
+  static List<(ZoeSituation, MoodState)> get moodVariants => [
+        for (final s in _moodLines.entries)
+          for (final m in s.value.keys) (s.key, m),
+      ];
+
+  /// Para sa test: may linya ba ang mood variant sa lahat ng language?
+  static bool moodVariantHasAllLanguages(ZoeSituation situation, MoodState mood) {
+    final byLang = _moodLines[situation]?[mood];
     if (byLang == null) return false;
     return ZoeLanguage.values.every((l) => (byLang[l] ?? const []).isNotEmpty);
   }
@@ -275,6 +363,31 @@ class ZoeLines {
       ZoeLanguage.english: ["That one can't be divided by zero."],
       ZoeLanguage.tagalog: ['Hindi pwedeng hatiin sa zero.'],
       ZoeLanguage.both: ['Hindi pwedeng i-divide sa zero.'],
+    },
+    // Dati: nakasulat sa loob ng ChatPreviewBrain._scheduleOn.
+    ZoeSituation.dayFree: {
+      ZoeLanguage.english: ['Nothing scheduled on {day}.'],
+      ZoeLanguage.tagalog: ['Wala kang naka-schedule sa {day}.'],
+      ZoeLanguage.both: ['Wala kang naka-schedule sa {day}.'],
+    },
+    ZoeSituation.dayList: {
+      ZoeLanguage.english: ['On {day} you have: {items}.'],
+      ZoeLanguage.tagalog: ['Sa {day}, meron kang: {items}.'],
+      ZoeLanguage.both: ['Sa {day}, meron kang: {items}.'],
+    },
+    ZoeSituation.feelingAck: {
+      ZoeLanguage.english: [
+        'Got it — one thing at a time.',
+        "Okay. Let's make it a little lighter.",
+      ],
+      ZoeLanguage.tagalog: [
+        'Sige, isa-isa lang tayo.',
+        'Sige, gagaanin natin kahit kaunti.',
+      ],
+      ZoeLanguage.both: [
+        'Got it, isa-isa lang tayo.',
+        'Okay, gaanin natin kahit konti.',
+      ],
     },
     ZoeSituation.stopAlarmHelp: {
       ZoeLanguage.english: [
@@ -393,6 +506,26 @@ class ZoeLines {
       ZoeLanguage.tagalog: ['{done} na ang tapos — tuloy lang 💪'],
       ZoeLanguage.both: ['{done} na ang tapos — keep going 💪'],
     },
+    ZoeSituation.homeGentleMissed: {
+      ZoeLanguage.english: ["That's okay — one at a time 🌱"],
+      ZoeLanguage.tagalog: ['Okay lang, isa-isa lang tayo 🌱'],
+      ZoeLanguage.both: ['Okay lang, isa-isa lang tayo 🌱'],
+    },
+    ZoeSituation.homeGentle: {
+      ZoeLanguage.english: ["Go easy today — I'll keep track 🌱"],
+      ZoeLanguage.tagalog: ['Dahan-dahan lang ngayon, ako na ang bahala sa listahan 🌱'],
+      ZoeLanguage.both: ['Easy lang today, ako na bahala mag-track 🌱'],
+    },
+    ZoeSituation.homeProud: {
+      ZoeLanguage.english: ['You finished everything. Proud of you! 🎉'],
+      ZoeLanguage.tagalog: ["Natapos mo lahat. Proud ako sa'yo! 🎉"],
+      ZoeLanguage.both: ["Natapos mo lahat today. Proud ako sa'yo! 🎉"],
+    },
+    ZoeSituation.homeNight: {
+      ZoeLanguage.english: ["It's late — rest when you can 🌙"],
+      ZoeLanguage.tagalog: ['Gabi na — magpahinga ka kapag kaya mo na 🌙'],
+      ZoeLanguage.both: ['Late na — pahinga ka kapag kaya mo na 🌙'],
+    },
 
     // ── Sagot ayon sa nararamdaman ng user ───────────────────────────
     // Mga rules: maikli, mainit, walang paninisi, hindi nagda-diagnose.
@@ -496,6 +629,95 @@ class ZoeLines {
       ZoeLanguage.english: ['Love that! Nice work.', "That's great to hear!"],
       ZoeLanguage.tagalog: ['Ang saya naman! Ang galing mo.', 'Ang sarap pakinggan niyan!'],
       ZoeLanguage.both: ['Love that! Ang galing mo.', 'Nice, ang saya niyan!'],
+    },
+  };
+
+  // ───────────────────── Mga linya ayon sa mood ni Zoe ─────────────────────
+  // Kapag wala rito ang (situation, mood), ang karaniwang linya sa [_lines]
+  // ang ginagamit. Ang "focused" ay walang sariling linya (maikling status lang).
+  // Rules: walang paninisi, walang guilt sa streak, walang "ako lang ang kaibigan mo".
+  static const _moodLines =
+      <ZoeSituation, Map<MoodState, Map<ZoeLanguage, List<String>>>>{
+    ZoeSituation.greeting: {
+      MoodState.gentle: {
+        ZoeLanguage.english: [
+          "Hi. I'm here — what do you need?",
+          'Hey. Take your time — what can I help with?',
+        ],
+        ZoeLanguage.tagalog: [
+          'Hi. Nandito lang ako — ano ang kailangan mo?',
+          'Kumusta. Dahan-dahan lang — ano ang maitutulong ko?',
+        ],
+        ZoeLanguage.both: [
+          "Hi. Nandito lang ako — ano'ng kailangan mo?",
+          'Hey. Take your time — ano maitutulong ko?',
+        ],
+      },
+      MoodState.happy: {
+        ZoeLanguage.english: ["Hi! Your day's going well. What's next?"],
+        ZoeLanguage.tagalog: ['Hi! Maganda ang takbo ng araw mo. Ano ang susunod?'],
+        ZoeLanguage.both: ["Hi! Ang ganda ng flow ng araw mo. Ano'ng next?"],
+      },
+      MoodState.proud: {
+        ZoeLanguage.english: ["Hi! You're on a roll today. What's next?"],
+        ZoeLanguage.tagalog: ['Hi! Ang galing mo ngayong araw. Ano ang susunod?'],
+        ZoeLanguage.both: ["Hi! Ang galing mo today. Ano'ng next?"],
+      },
+      MoodState.sleepy: {
+        ZoeLanguage.english: ["Hi. It's late — want me to set something for tomorrow?"],
+        ZoeLanguage.tagalog: ['Hi. Gabi na — may gusto ka bang ipaalala ko bukas?'],
+        ZoeLanguage.both: ['Hi. Late na — may gusto ka bang i-remind ko bukas?'],
+      },
+      MoodState.sorry: {
+        ZoeLanguage.english: ["Hi. Sorry about earlier — I'm ready now. What do you need?"],
+        ZoeLanguage.tagalog: ['Hi. Pasensya kanina — ayos na ako. Ano ang kailangan mo?'],
+        ZoeLanguage.both: ["Hi. Sorry kanina — okay na ako. Ano'ng kailangan mo?"],
+      },
+    },
+    ZoeSituation.thanks: {
+      MoodState.gentle: {
+        ZoeLanguage.english: ['Anytime. Take care of yourself.'],
+        ZoeLanguage.tagalog: ['Walang anuman. Ingatan mo ang sarili mo.'],
+        ZoeLanguage.both: ['Anytime. Take care ka, ha.'],
+      },
+    },
+    ZoeSituation.todayList: {
+      MoodState.gentle: {
+        ZoeLanguage.english: ["Today you have: {items}. One at a time — you've got this."],
+        ZoeLanguage.tagalog: ["Ngayong araw: {items}. Isa-isa lang, kaya mo 'yan."],
+        ZoeLanguage.both: ["Today meron kang: {items}. Isa-isa lang, kaya mo 'yan."],
+      },
+      MoodState.proud: {
+        ZoeLanguage.english: ["Today you have: {items}. You're doing great so far."],
+        ZoeLanguage.tagalog: ['Ngayong araw: {items}. Ang ganda ng takbo mo.'],
+        ZoeLanguage.both: ['Today meron kang: {items}. Ang galing mo so far.'],
+      },
+    },
+    ZoeSituation.todayFree: {
+      MoodState.gentle: {
+        ZoeLanguage.english: ['Nothing scheduled today. A good day to go easy on yourself.'],
+        ZoeLanguage.tagalog: ['Wala kang naka-schedule ngayon. Pwede kang magdahan-dahan.'],
+        ZoeLanguage.both: ['Wala kang naka-schedule today. Okay lang mag-slow down.'],
+      },
+      MoodState.sleepy: {
+        ZoeLanguage.english: ['Nothing scheduled today. Rest well tonight.'],
+        ZoeLanguage.tagalog: ['Wala kang naka-schedule ngayon. Magpahinga ka nang maayos ngayong gabi.'],
+        ZoeLanguage.both: ['Wala kang naka-schedule today. Rest well tonight.'],
+      },
+    },
+    ZoeSituation.missedList: {
+      MoodState.gentle: {
+        ZoeLanguage.english: ["You missed: {items}. That's okay — we can pick them up one at a time."],
+        ZoeLanguage.tagalog: ['Na-miss mo: {items}. Okay lang — isa-isahin natin.'],
+        ZoeLanguage.both: ['Na-miss mo: {items}. Okay lang — isa-isahin natin.'],
+      },
+    },
+    ZoeSituation.missedNone: {
+      MoodState.proud: {
+        ZoeLanguage.english: ["You didn't miss anything. Proud of you!"],
+        ZoeLanguage.tagalog: ["Wala kang na-miss. Proud ako sa'yo!"],
+        ZoeLanguage.both: ["Wala kang na-miss. Proud ako sa'yo!"],
+      },
     },
   };
 }
