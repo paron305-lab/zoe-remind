@@ -129,8 +129,14 @@ class IntentClassifier {
 
     try {
       final raw = await _ask(input);
-      final intent = parse(raw);
-      final label = intent?.label ?? 'null (hindi label: "${raw.trim()}")';
+      final said = parse(raw);
+      // Code ang may huling salita: "reminder" na walang oras / araw / utos → unknown.
+      final intent = checkWithCode(said, input);
+      final label = said == null
+          ? 'null (hindi label: "${raw.trim()}")'
+          : intent == said
+              ? said.label
+              : '${said.label} → ${intent?.label} (walang oras/araw/utos)';
       lastResult = '$label · ${took()}';
       return intent;
     } on TimeoutException {
@@ -142,6 +148,70 @@ class IntentClassifier {
       lastResult = 'null ($e) · ${took()}';
       return null;
     }
+  }
+
+  // ───────────── Code check sa sagot ni Qwen (create_reminder / create_task) ─────────────
+  //
+  // Ang maliit na model ay minsang nagsasabing "create_reminder" kahit hindi
+  // naman (hal. "hindi ako pagod", "ano pwede gawin kapag tinatamad?") →
+  // lumalabas ang "What time?". Kaya tinitingnan muna ng code kung may
+  // palatandaan talaga: utos, oras / araw, o "kailangan kong…".
+
+  /// Malinaw na utos: remind, paalala, alarm, add task, i-set…
+  static final _createWords = RegExp(
+    r'\b(remind|reminder|reminders|i-?remind|paalala|paalalahanan|ipaalala|alarm'
+    r'|gisingin|wake me|abisuhan|i-?alert|alert me|sabihan mo|set|i-?set|add|i-?add'
+    r'|task|to-?do|gawain|schedule|i-?schedule|i-?lista|isulat mo)\b',
+  );
+
+  /// May oras o araw: "8am", "7:30", "alas 5", "bukas", "sa Sabado", "Feb 12".
+  /// Walang "linggo" (pwedeng "week" o "Sunday") at walang "ngayon" (masyadong karaniwan).
+  static final _when = RegExp(
+    r'\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)'
+    r'|\b([01]?\d|2[0-3]):[0-5]\d\b'
+    r'|\balas[\s-]*\d'
+    r'|\b(umaga|tanghali|hapon|gabi|noon|tonight|mamaya|mamayang|later|bukas|tomorrow'
+    r'|today|ngayong araw|next week|susunod na linggo|every|araw-?araw|tuwing'
+    r'|daily|weekly)\b'
+    r'|\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes'
+    r'|miyerkules|huwebes|biyernes|sabado)\b'
+    r'|\b(january|february|march|april|june|july|august|september|october|november'
+    r'|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec|enero|pebrero|marso'
+    r'|abril|mayo|hunyo|hulyo|agosto|setyembre|oktubre|nobyembre|disyembre)\.?\s+\d'
+    r'|\bin \d+ ?(minutes?|mins?|hours?|hrs?)\b',
+  );
+
+  /// "Kailangan kong…", "bibili pa ako…", "I need to…" — may gagawin (task).
+  static final _needWords = RegExp(
+    r"\b(kailangan|kelangan|need to|have to|has to|got to|gotta|must|dapat|bibili"
+    r"|bumili|buy|magbabayad|magbayad|bayaran|pay|pupunta|gagawa|tatapusin|ipapasa"
+    r"|submit|deadline|i should|i'll|i will)\b",
+  );
+
+  /// Tanong: "ano…", "paano…", "what…", o may "?" sa dulo.
+  static final _question = RegExp(
+    r"^(zoe[,\s]+)?(ano|anong|ano'ng|paano|bakit|saan|sino|pwede ba|what|how|why"
+    r"|where|who|should i|is it|do you)\b|\?\s*$",
+  );
+
+  /// Tinatanggap lang ang create_reminder / create_task ni Qwen kapag may
+  /// palatandaan sa mensahe. Kung wala → unknown (hindi na magtatanong ng oras).
+  /// Ang ibang label ay hindi ginagalaw.
+  ///
+  ///  • may utos (remind, paalala, add task…)             → tanggap
+  ///  • tanong na walang utos ("ano pwede gawin…?")       → unknown
+  ///  • reminder: may oras o araw                          → tanggap
+  ///  • task: may oras / araw o "kailangan / bibili…"      → tanggap
+  ///  • wala sa itaas ("hindi ako pagod")                  → unknown
+  @visibleForTesting
+  static ZoeIntent? checkWithCode(ZoeIntent? intent, String text) {
+    if (intent != ZoeIntent.createReminder && intent != ZoeIntent.createTask) return intent;
+    final t = text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (_createWords.hasMatch(t)) return intent;
+    if (_question.hasMatch(t)) return ZoeIntent.unknown;
+    if (_when.hasMatch(t)) return intent;
+    if (intent == ZoeIntent.createTask && _needWords.hasMatch(t)) return intent;
+    return ZoeIntent.unknown;
   }
 
   /// Allowlist check: dapat may eksaktong label sa sagot. Kung wala → null.

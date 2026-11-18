@@ -26,6 +26,10 @@ class ToneDetector {
           r'|worn out|burned out|burnt out|burnout)\b'),
       RegExp(r"\b(walang tulog|wala akong tulog|kulang (sa )?tulog|no sleep"
           r"|didn'?t sleep|haven'?t slept)\b"),
+      // Tinatamad / walang energy — mababa ang lakas, kaya kasama sa pagod.
+      RegExp(r'\b(tinatamad|tamad|katamad|nakakatamad|tinamad|tamarin|lazy'
+          r'|unmotivated|walang motivation|no motivation|no energy|walang energy'
+          r'|walang lakas|procrastinating|nagpo-?procrastinate)\b'),
     ],
     UserTone.stressed: [
       RegExp(r'\b(stress|stressed|stressful|na-?stress|nai-?stress|overwhelmed'
