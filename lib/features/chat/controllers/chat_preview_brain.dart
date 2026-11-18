@@ -13,10 +13,12 @@ import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_now.dart';
 import 'package:zoe_remind/features/companion/controllers/tone_detector.dart';
 import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 import 'package:zoe_remind/features/companion/models/mood_state.dart';
+import 'package:zoe_remind/features/companion/models/mood_week.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
@@ -31,6 +33,9 @@ import 'package:zoe_remind/features/companion/models/user_tone.dart';
 ///                          hindi pinipindot ng user ang Accept.
 ///   6. Ang mga salita ni Zoe ay galing sa ZoeLines (code), hindi kay Qwen,
 ///      at pinipili ayon sa mood ni Zoe (gentle / proud / sleepy…).
+///   7. Mood log (Level 2): binibilang ang tone (hindi ang mensahe) sa
+///      huling 7 araw. Kapag 3+ araw nang pagod / stressed, minsan isang araw
+///      sasabihin ni Zoe: "Mukhang busy ang linggo mo…" bago ang feeling script.
 ///
 /// Nararamdaman (2c):
 ///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
@@ -61,12 +66,16 @@ class ChatPreviewBrain {
     IntentClassifier? classifier,
     MoodState Function()? mood,
     void Function(ZoeEvent event)? onMoodEvent,
+    void Function(UserTone tone)? onTone,
+    Future<WeekVibe?> Function(UserTone tone)? weekNote,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
         _notes = notes ?? NoteRepository(),
         _classifier = classifier ?? IntentClassifier(),
         _moodOf = mood ?? (() => MoodNow.current),
-        _report = onMoodEvent ?? MoodController.instance.add;
+        _report = onMoodEvent ?? MoodController.instance.add,
+        _logTone = onTone ?? MoodLog.instance.record,
+        _weekNote = weekNote ?? MoodLog.instance.noteFor;
 
   /// true = gumagana ang chat (keywords) kahit walang naka-download na model.
   static const enabled = true;
@@ -81,6 +90,12 @@ class ChatPreviewBrain {
 
   /// Saan ipapasa ang event (UserFeelsDown, UserPositive). Default: MoodController.
   final void Function(ZoeEvent event) _report;
+
+  /// Saan bibilangin ang tone (mood log, 7 araw). Default: MoodLog.
+  final void Function(UserTone tone) _logTone;
+
+  /// May sasabihin ba tungkol sa linggo? (isang beses kada araw). Default: MoodLog.
+  final Future<WeekVibe?> Function(UserTone tone) _weekNote;
 
   ZoeLanguage _lang = ZoeLanguage.both;
 
@@ -126,8 +141,11 @@ class ChatPreviewBrain {
     if (lower == 'test error') throw StateError('UI preview error');
 
     // Nararamdaman ng user → ipaalam sa MoodController (pagod → gentle si Zoe).
-    // Hindi sine-save ang tone mismo; ang mood lang ni Zoe ang nagbabago.
+    // Ang mensahe ay hindi sine-save dito; ang mood ni Zoe ang nagbabago.
     final tone = toneOf(text);
+    // Mood log (7 araw): +1 sa bilang ng tone ngayong araw (hindi ang mensahe).
+    // OFF sa Settings → walang binibilang. Neutral → wala.
+    if (tone != UserTone.neutral) _logTone(tone);
     final event = ToneDetector.toMoodEvent(tone);
     if (event != null) {
       _report(event);
@@ -157,7 +175,13 @@ class ChatPreviewBrain {
     // (Kapag may utos — reminder, task, listahan — ang utos pa rin ang sinusunod.)
     final feeling = ZoeLines.situationForTone(tone);
     if (feeling != null && (intent == ZoeIntent.unknown || intent == ZoeIntent.greeting)) {
-      return [TextEntry(fromZoe: true, text: _say(feeling))];
+      final reply = TextEntry(fromZoe: true, text: _say(feeling));
+      // Level 2: ilang araw nang ganito? (isang beses lang kada araw)
+      final week = await _weekLine(tone);
+      if (week == null) return [reply];
+      // Pagod / stressed: "Mukhang busy ang linggo mo…" muna, saka ang script.
+      // Masaya: ang script muna, saka "Ang dami mong good days…".
+      return tone.isDown ? [week, reply] : [reply, week];
     }
 
     // May utos pero pagod / stressed → maikling "isa-isa lang tayo" bago ang sagot.
@@ -166,6 +190,19 @@ class ChatPreviewBrain {
       return [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...answer];
     }
     return answer;
+  }
+
+  /// Linya tungkol sa linggo (mood log), o null kung wala / nasabi na ngayong araw.
+  /// Kapag pumalya ang database, null lang — hindi naaapektuhan ang sagot.
+  Future<TextEntry?> _weekLine(UserTone tone) async {
+    WeekVibe? vibe;
+    try {
+      vibe = await _weekNote(tone);
+    } catch (_) {
+      vibe = null;
+    }
+    if (vibe == null) return null;
+    return TextEntry(fromZoe: true, text: _say(ZoeLines.situationForWeek(vibe)));
   }
 
   /// Sagot ayon sa intent (code muna; si Qwen kapag hindi alam ng code).

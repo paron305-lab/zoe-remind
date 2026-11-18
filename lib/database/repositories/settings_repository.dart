@@ -33,6 +33,8 @@ class SettingsRepository {
   static const _kLanguage = 'language_mode';
   static const _kDarkMode = 'dark_mode';
   static const _kLongTermMemory = 'long_term_memory';
+  static const _kMoodLog = 'mood_log';
+  static const _kMoodLogNotedOn = 'mood_log_noted_on';
   static const _kDeveloper = 'developer_unlocked';
   static const _kActiveModel = 'active_model';
 
@@ -131,6 +133,15 @@ class SettingsRepository {
   /// Default ON. Kapag OFF, hindi magsasave ng bagong memories si Zoe.
   Future<bool> isLongTermMemoryOn() async => await _get(_kLongTermMemory) != 'false';
   Future<void> setLongTermMemory(bool on) => setValue(_kLongTermMemory, '$on');
+
+  /// Mood log (7 araw). Default ON. Kapag OFF, walang binibilang si Zoe.
+  Future<bool> isMoodLogOn() async => await _get(_kMoodLog) != 'false';
+  Future<void> setMoodLog(bool on) => setValue(_kMoodLog, '$on');
+
+  /// Araw ('yyyy-MM-dd') na huling nagsalita si Zoe tungkol sa linggo.
+  /// '' = hindi pa. Para isang beses lang kada araw.
+  Future<String> getMoodLogNotedOn() async => await _get(_kMoodLogNotedOn) ?? '';
+  Future<void> setMoodLogNotedOn(String day) => setValue(_kMoodLogNotedOn, day);
 
   Future<bool> isDeveloperUnlocked() async => await _get(_kDeveloper) == 'true';
   Future<void> setDeveloperUnlocked(bool on) => setValue(_kDeveloper, '$on');

@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/features/companion/models/mood_state.dart';
+import 'package:zoe_remind/features/companion/models/mood_week.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 
 /// Mga sitwasyon kung saan may sinasabi si Zoe.
@@ -98,6 +99,17 @@ enum ZoeSituation {
 
   /// "natapos ko na lahat!!", "yay!", "hahaha"
   feelingHappy,
+
+  // ── Mood log, huling 7 araw (Level 2) ────────────────────────────
+  // Isang beses lang kada araw, kasabay ng feeling script.
+  /// Ilang araw nang pagod / stressed. "Mukhang busy ang linggo mo."
+  weekBusy,
+
+  /// Ilang araw nang malungkot / inis / kabado.
+  weekHeavy,
+
+  /// Ilang araw nang masaya.
+  weekGood,
 }
 
 /// Zoe Lines — ang boses ni Zoe (Personality plan, P1 Voice).
@@ -224,6 +236,13 @@ class ZoeLines {
         UserTone.sad => ZoeSituation.feelingSad,
         UserTone.upset => ZoeSituation.feelingUpset,
         UserTone.worried => ZoeSituation.feelingWorried,
+      };
+
+  /// Linya tungkol sa linggo (mood log). Hal. busy → weekBusy.
+  static ZoeSituation situationForWeek(WeekVibe vibe) => switch (vibe) {
+        WeekVibe.busy => ZoeSituation.weekBusy,
+        WeekVibe.heavy => ZoeSituation.weekHeavy,
+        WeekVibe.good => ZoeSituation.weekGood,
       };
 
   /// Para sa test: may linya ba ang [situation] sa lahat ng language?
@@ -629,6 +648,53 @@ class ZoeLines {
       ZoeLanguage.english: ['Love that! Nice work.', "That's great to hear!"],
       ZoeLanguage.tagalog: ['Ang saya naman! Ang galing mo.', 'Ang sarap pakinggan niyan!'],
       ZoeLanguage.both: ['Love that! Ang galing mo.', 'Nice, ang saya niyan!'],
+    },
+
+    // ── Tungkol sa linggo (mood log, Level 2) ────────────────────────
+    // Napapansin lang — walang diagnosis, walang paninisi, walang
+    // "ano'ng problema mo?". Sinusundan ng karaniwang feeling script.
+    ZoeSituation.weekBusy: {
+      ZoeLanguage.english: [
+        "Looks like it's been a busy week — you've been tired or stressed a few days now.",
+        "This week's been a lot, huh? A few tiring days in a row.",
+      ],
+      ZoeLanguage.tagalog: [
+        'Mukhang busy ang linggo mo — ilang araw ka nang pagod o stressed.',
+        'Mabigat-bigat ang linggong ito, ano? Ilang araw ka nang pagod.',
+      ],
+      ZoeLanguage.both: [
+        'Mukhang busy ang week mo — ilang araw ka nang pagod or stressed.',
+        'Ang dami ng ganap this week, ano? Ilang araw ka nang drained.',
+      ],
+    },
+    ZoeSituation.weekHeavy: {
+      ZoeLanguage.english: [
+        "It's been a heavy few days for you this week. Let's take it slow.",
+        "This week's had some hard days. Go easy on yourself, okay?",
+      ],
+      ZoeLanguage.tagalog: [
+        'Ilang araw nang mabigat ang pakiramdam mo ngayong linggo. Dahan-dahan lang tayo.',
+        'May ilang mahirap na araw ngayong linggo. Huwag mong masyadong pagurin '
+            'ang sarili mo, ha?',
+      ],
+      ZoeLanguage.both: [
+        'Ilang araw nang mabigat ang feeling mo this week. Dahan-dahan lang tayo.',
+        'May ilang tough days this week. Go easy on yourself, okay?',
+      ],
+    },
+    ZoeSituation.weekGood: {
+      ZoeLanguage.english: [
+        "You've had a lot of good days this week — love to see it!",
+        "That's a few happy days this week. Keep it going!",
+      ],
+      ZoeLanguage.tagalog: [
+        'Ang dami mong masayang araw ngayong linggo — ang saya niyan!',
+        'Ilang araw ka nang masaya ngayong linggo. Tuloy lang!',
+      ],
+      ZoeLanguage.both: [
+        'Ang dami mong good days this week — love to see it!',
+        'Ilang araw ka nang happy this week. Keep it going!',
+      ],
     },
   };
 

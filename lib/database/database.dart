@@ -26,7 +26,8 @@ class ZoeDatabase {
   /// v10: model_state.tier / model_name, dalawang row na ang pwede
   ///      (id 1 = Zoe Lite, id 2 = Zoe Plus)
   /// v11: zoe_mood (mood ni Zoe, para pareho pa rin pagbukas ulit ng app)
-  static const _version = 11;
+  /// v12: mood_log (Level 2: bilang ng pagod / stressed… sa huling 7 araw)
+  static const _version = 12;
 
   Future<Database>? _opening;
 
@@ -405,6 +406,20 @@ class ZoeDatabase {
         seen_missed INTEGER NOT NULL DEFAULT 0,
         seen_overdue INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // Mood log (Companion Level 2). Isang row kada (araw, tone):
+    // ilang beses pagod / stressed / masaya… ang user sa araw na iyon.
+    // BILANG LANG — walang mensahe ng user. Kusang binubura ang mas luma
+    // sa 7 araw (MoodLog). Bagong table lang → sapat ang IF NOT EXISTS (v11 → v12).
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.moodLogTable} (
+        day TEXT NOT NULL,
+        tone TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (day, tone)
       )
     ''');
 

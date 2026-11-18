@@ -4,7 +4,10 @@ import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
 import 'package:zoe_remind/features/companion/models/mood_state.dart';
+import 'package:zoe_remind/features/companion/models/mood_week.dart';
+import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 import 'package:zoe_remind/features/settings/screens/brain_test_screen.dart';
@@ -196,6 +199,16 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
               ),
               const SizedBox(height: 8),
               _moodCard(),
+              const SizedBox(height: 24),
+
+              _section('7. Mood log (7 araw)'),
+              Text(
+                'Pindutin ang "3 araw pagod", saka sabihin sa chat: "pagod na ako". '
+                'Dapat sabihin ni Zoe: "Mukhang busy ang linggo mo…" (isang beses kada araw).',
+                style: TextStyle(fontFamily: 'Poppins', color: HomeColors.inkSoft),
+              ),
+              const SizedBox(height: 8),
+              _moodLogCard(),
             ],
           ),
         ),
@@ -265,6 +278,84 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
           ),
         );
       },
+    );
+  }
+
+  /// Buod ng huling 7 araw + kailan huling nagsalita si Zoe tungkol sa linggo.
+  Future<(MoodWeek, String)> _loadMoodLog() async {
+    final log = MoodLog.instance;
+    final week = await log.week();
+    final noted = await log.notedOn();
+    return (week, noted);
+  }
+
+  /// Laman ng mood log + test buttons (Level 2).
+  Widget _moodLogCard() {
+    final log = MoodLog.instance;
+    return ValueListenableBuilder<int>(
+      valueListenable: log.changes,
+      builder: (context, _, __) => FutureBuilder<(MoodWeek, String)>(
+        future: _loadMoodLog(),
+        builder: (context, snap) {
+          final (week, noted) = snap.data ?? (MoodWeek.empty, '');
+          final counts = week.counts.entries.map((e) => '${e.key.name} ${e.value}').join(', ');
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'vibe: ${week.vibe?.name ?? '—'}',
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.w700, color: _lavender),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('bilang: ${counts.isEmpty ? '—' : counts}',
+                      style: const TextStyle(fontSize: 13)),
+                  Text('araw na pagod/stressed/malungkot…: ${week.downDays} · masaya: ${week.happyDays}',
+                      style: const TextStyle(fontSize: 13)),
+                  Text('huling nasabi ni Zoe: ${noted.isEmpty ? '—' : noted}',
+                      style: const TextStyle(fontSize: 13)),
+                  if (!log.isStarted)
+                    const Text('⚠️ Hindi pa nagsisimula ang MoodLog',
+                        style: TextStyle(fontSize: 13, color: _coral)),
+                  if (!log.enabled.value)
+                    const Text('⚠️ OFF sa Settings › Privacy & memory',
+                        style: TextStyle(fontSize: 13, color: _coral)),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => log.seedTestDays(),
+                        child: const Text('3 araw pagod'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () => log.seedTestDays(UserTone.sad),
+                        child: const Text('3 araw malungkot'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () => log.seedTestDays(UserTone.happy),
+                        child: const Text('3 araw masaya'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () => log.resetNotedToday(),
+                        child: const Text('Pwede ulit ngayon'),
+                      ),
+                      TextButton(
+                        onPressed: () => log.clearAll(),
+                        child: const Text('Burahin lahat', style: TextStyle(color: _coral)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 

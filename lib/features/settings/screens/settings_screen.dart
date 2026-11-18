@@ -14,6 +14,9 @@ import 'package:zoe_remind/database/models/model_info.dart';
 import 'package:zoe_remind/database/repositories/chat_history_repository.dart';
 import 'package:zoe_remind/database/repositories/memory_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
+import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
+import 'package:zoe_remind/features/companion/models/mood_week.dart';
+import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/onboarding/widgets/profile_page.dart' show showPolicySheet;
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
@@ -28,7 +31,7 @@ import 'package:zoe_remind/supabase/model_config_service.dart';
 /// Profile · Zoe Chat · Zoe's Brain · Reminders · Privacy & Memory ·
 /// Appearance · About · Developer (hidden — 7 taps sa app version).
 /// Lahat ng value ay galing / sine-save sa zoe.db (settings, user_profile,
-/// model_state, ai_messages, memories).
+/// model_state, ai_messages, memories, mood_log).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -42,6 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   final _memories = MemoryRepository();
   final _alarms = ReminderAlarmService.instance;
   final _downloader = ModelDownloader.instance;
+  final _moodLog = MoodLog.instance;
 
   bool _loading = true;
   bool _busy = false;
@@ -67,6 +71,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   bool _longTermMemory = true;
   bool _developer = false;
 
+  /// Mood log (7 araw): bilang ng pagod / stressed… ngayong linggo.
+  MoodWeek _moodWeek = MoodWeek.empty;
+
   /// 7 taps sa app version → lalabas ang Developer.
   int _versionTaps = 0;
   static const _tapsToUnlock = 7;
@@ -83,6 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     WidgetsBinding.instance.addObserver(this);
     ChatHistoryRepository.changes.addListener(_loadCounts);
     MemoryRepository.changes.addListener(_loadCounts);
+    _moodLog.changes.addListener(_loadCounts);
     // Bell sa Home → sabay ang switch dito.
     _alarms.enabled.addListener(_rebuild);
     _alarms.sound.addListener(_rebuild);
@@ -97,6 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     WidgetsBinding.instance.removeObserver(this);
     ChatHistoryRepository.changes.removeListener(_loadCounts);
     MemoryRepository.changes.removeListener(_loadCounts);
+    _moodLog.changes.removeListener(_loadCounts);
     _alarms.enabled.removeListener(_rebuild);
     _alarms.sound.removeListener(_rebuild);
     _alarms.vibrate.removeListener(_rebuild);
@@ -150,10 +159,12 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     try {
       final chats = await _chats.messageCount();
       final memories = await _memories.count();
+      final week = await _moodLog.week();
       if (!mounted) return;
       setState(() {
         _chatCount = chats;
         _memoryCount = memories;
+        _moodWeek = week;
       });
     } catch (e) {
       debugPrint('Loading chat/memory counts failed: $e');
@@ -521,6 +532,56 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         ok: on ? 'Zoe will remember what matters 💭' : "Zoe won't save new memories");
   }
 
+  /// ON → magbibilang si Zoe. OFF → titigil at buburahin ang laman (may confirm).
+  Future<void> _setMoodLog(bool on) async {
+    if (!on) {
+      final ok = await confirmAction(
+        context,
+        palette: _p,
+        title: 'I-off ang mood log?',
+        message: 'Hindi na magbibilang si Zoe kung ilang araw kang pagod o stressed, '
+            'at mabubura ang laman ngayon. Pwede mo itong i-on ulit kahit kailan.',
+        confirmLabel: 'I-off',
+      );
+      if (!ok || !mounted) return;
+    }
+    await _save(() => _moodLog.setEnabled(on),
+        ok: on ? 'Mood log ON — sa phone mo lang 🔒' : 'Mood log OFF — nabura na ang laman');
+    if (mounted) setState(() {});
+    await _loadCounts();
+  }
+
+  Future<void> _clearMoodLog() async {
+    final ok = await confirmAction(
+      context,
+      palette: _p,
+      title: 'Burahin ang mood log?',
+      message: 'Mabubura ang bilang ng pagod, stressed at iba pa sa huling 7 araw. '
+          'Hindi ito mababawi. Hindi mabubura ang chats, tasks, reminders at notes.',
+      confirmLabel: 'Burahin',
+    );
+    if (!ok) return;
+    await _save(_moodLog.clearAll, ok: 'Nabura na ang mood log');
+  }
+
+  /// "Pagod 2 · Stressed 1 · Masaya 3" — o "Wala pa" kapag walang laman.
+  String _moodWeekSubtitle() {
+    if (!_moodLog.enabled.value) return 'OFF';
+    if (_moodWeek.isEmpty) return 'Wala pa sa huling 7 araw';
+    const order = [
+      (UserTone.tired, 'Pagod'),
+      (UserTone.stressed, 'Stressed'),
+      (UserTone.sad, 'Malungkot'),
+      (UserTone.upset, 'Inis'),
+      (UserTone.worried, 'Kabado'),
+      (UserTone.happy, 'Masaya'),
+    ];
+    return [
+      for (final (tone, label) in order)
+        if (_moodWeek.count(tone) > 0) '$label ${_moodWeek.count(tone)}',
+    ].join(' · ');
+  }
+
   // ───────────────────────── Appearance ─────────────────────────
 
   Future<void> _setDarkMode(bool on) async {
@@ -733,7 +794,29 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                         value: _longTermMemory,
                         onChanged: _setLongTermMemory,
                         palette: p,
+                      ),
+                      SettingsTile.toggle(
+                        icon: Icons.insights_outlined,
+                        title: 'Mood log (7 araw)',
+                        subtitle: _moodLog.enabled.value
+                            ? 'Bilang lang ng pagod, stressed… sa phone mo lang. '
+                                'Kusang nabubura after 7 days.'
+                            : 'OFF — hindi nagbibilang si Zoe',
+                        value: _moodLog.enabled.value,
+                        onChanged: _setMoodLog,
+                        palette: p,
+                      ),
+                      SettingsTile(
+                        icon: Icons.calendar_view_week_outlined,
+                        title: 'Ngayong linggo',
+                        subtitle: _moodWeekSubtitle(),
+                        palette: p,
                         showDivider: false,
+                        trailing: _ClearButton(
+                          palette: p,
+                          label: 'Burahin lahat',
+                          onTap: _moodWeek.isEmpty ? null : _clearMoodLog,
+                        ),
                       ),
 
                       // 6. Appearance
@@ -832,7 +915,8 @@ class _PrivacyBanner extends StatelessWidget {
 class _ClearButton extends StatelessWidget {
   final SettingsPalette palette;
   final VoidCallback? onTap;
-  const _ClearButton({required this.palette, required this.onTap});
+  final String label;
+  const _ClearButton({required this.palette, required this.onTap, this.label = 'Clear'});
 
   @override
   Widget build(BuildContext context) {
@@ -844,7 +928,7 @@ class _ClearButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
-      child: const Text('Clear', style: SettingsText.button),
+      child: Text(label, style: SettingsText.button),
     );
   }
 }
