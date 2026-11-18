@@ -144,4 +144,17 @@ void main() {
       expect(IntentRules.isFeeling(m), isFalse, reason: m);
     }
   });
+
+  test('nararamdaman — may "hindi / not" bago ang salita → hindi', () {
+    for (final m in [
+      'hindi ako pagod',
+      'di naman ako stressed',
+      "I'm not tired",
+      'hindi naman ako malungkot',
+    ]) {
+      expect(IntentRules.isFeeling(m), isFalse, reason: m);
+    }
+    // May negation sa isa pero totoo ang isa pa → nararamdaman pa rin.
+    expect(IntentRules.isFeeling('hindi ako galit, pagod lang ako'), isTrue);
+  });
 }

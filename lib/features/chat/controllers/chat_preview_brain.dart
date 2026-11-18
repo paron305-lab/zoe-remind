@@ -172,7 +172,6 @@ class ChatPreviewBrain {
   Future<List<ChatEntry>> _answer(ZoeIntent codeIntent, String text, String lower) async {
     bool has(List<String> words) => words.any(lower.contains);
     var intent = codeIntent;
-    var askedQwen = false;
     if (intent == ZoeIntent.unknown) {
       // Hindi nabasa ng ToneDetector pero mukhang nagkukuwento ("nahihirapan ako")
       // → maikling malasakit, agad (hindi na kay Qwen).
@@ -181,7 +180,6 @@ class ChatPreviewBrain {
         _mood = MoodState.gentle;
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.comfort))];
       }
-      askedQwen = true;
       intent = await _classifier.classify(text) ?? ZoeIntent.unknown;
     } else if (!_warmStarted) {
       // Code ang sumagot ngayon. Habang nagbabasa ang user, ihanda na si Qwen
@@ -214,10 +212,9 @@ class ChatPreviewBrain {
           TextEntry(
             fromZoe: true,
             text: _say(ZoeSituation.unknown),
-            // "AI: …" = pansamantala, para makita sa screenshot ang sagot at
-            // bilis ni Qwen (hal. "unknown · 2.4s").
-            footnote: 'Try: "remind me…", "add task…", "i-note mo…"'
-                '${askedQwen ? ' · AI: ${IntentClassifier.lastResult}' : ''}',
+            // Halimbawa lang para sa user. (Para sa bilis ni Qwen:
+            // Developer › Brain Test — hindi na sa chat.)
+            footnote: 'Try: "remind me…", "add task…", "i-note mo…"',
           ),
         ];
     }

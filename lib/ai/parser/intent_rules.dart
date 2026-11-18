@@ -149,11 +149,23 @@ class IntentRules {
   );
   static final _aboutMe = RegExp(r"\b(ako|ko|akong|i'?m|i am|i feel|feeling)\b");
 
+  /// "hindi ako pagod", "di naman ako stressed", "I'm not tired".
+  /// Tinitingnan ang text BAGO ang salitang nararamdaman (gaya ng ToneDetector).
+  static final _negatedBefore = RegExp(
+    r"(^|\s)(hindi|hinde|di|'di|not|never|no|don'?t|isn'?t|wasn'?t|ain'?t)\s+"
+    r"((naman|na|ako|ko|i|am|im|i'm|really|so|very|masyado|gaano|feel|feeling)\s+){0,3}$",
+  );
+
   /// "pagod na ako", "I'm so tired" — nagkukuwento lang ng nararamdaman.
   /// Ginagamit lang kapag WALANG tumamang rule sa [match], kaya ang
   /// "remind me to rest, pagod ako" ay reminder pa rin.
+  /// "hindi ako pagod" → false (may negation bago ang salita).
   static bool isFeeling(String text) {
     final lower = _clean(text);
-    return _feelingWord.hasMatch(lower) && _aboutMe.hasMatch(lower);
+    if (!_aboutMe.hasMatch(lower)) return false;
+    for (final m in _feelingWord.allMatches(lower)) {
+      if (!_negatedBefore.hasMatch(lower.substring(0, m.start))) return true;
+    }
+    return false;
   }
 }

@@ -87,6 +87,20 @@ void main() {
       expect(events.single, isA<UserFeelsDown>());
     });
 
+    test('"hindi ako pagod" → walang malasakit, walang mood event', () async {
+      final reply = await brainWith().reply('hindi ako pagod', ZoeLanguage.tagalog);
+      final text = textOf(reply.single);
+      expect(isLine(text, ZoeLanguage.tagalog, ZoeSituation.comfort), isFalse, reason: text);
+      expect(isLine(text, ZoeLanguage.tagalog, ZoeSituation.feelingTired), isFalse, reason: text);
+      expect(events, isEmpty);
+    });
+
+    test('walang "AI: …" sa footnote ng hindi-naintindihan', () async {
+      final reply = await brainWith().reply('ang ganda ng panahon', ZoeLanguage.both);
+      final entry = reply.single as TextEntry;
+      expect(entry.footnote, isNot(contains('AI:')));
+    });
+
     test('"salamat, ang galing mo" → pasasalamat, isang event lang', () async {
       final reply = await brainWith().reply('salamat, ang galing mo', ZoeLanguage.tagalog);
       expect(isLine(textOf(reply.single), ZoeLanguage.tagalog, ZoeSituation.thanks), isTrue);
