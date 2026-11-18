@@ -108,8 +108,16 @@ class Reminder {
       ReminderRepeat.none => ZoeDate.sameDay(d, start),
       ReminderRepeat.daily => true,
       ReminderRepeat.weekly => d.weekday == start.weekday,
-      ReminderRepeat.monthly => d.day == start.day,
+      ReminderRepeat.monthly => d.day == monthlyDayIn(start.day, d.year, d.month),
     };
+  }
+
+  /// Araw ng monthly reminder sa isang buwan.
+  /// Kapag mas maikli ang buwan (hal. 31 → Feb), ang HULING araw ng buwan
+  /// ang gagamitin: 31 → Feb 28 (o 29), Apr 30, Jun 30, Sep 30, Nov 30.
+  static int monthlyDayIn(int startDay, int year, int month) {
+    final lastDay = DateTime(year, month + 1, 0).day; // day 0 = huling araw ng [month]
+    return startDay > lastDay ? lastDay : startDay;
   }
 
   /// Na-done ba ang reminder sa [day]?

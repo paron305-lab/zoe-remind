@@ -1,7 +1,11 @@
 import 'package:zoe_remind/core/constants/storage_constants.dart';
+import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/database/models/task.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
+
+/// Isang row ng completion_history para sa task.
+typedef CompletedTask = ({int taskId, String title, DateTime completedAt});
 
 /// Thrown when someone tries to change a task that is already history 🔒.
 class TaskLockedException implements Exception {
@@ -195,6 +199,32 @@ class TaskRepository {
     }
     return db.query(_taskHistory,
         where: where.join(' AND '), whereArgs: args, orderBy: 'day ASC, time ASC');
+  }
+
+  /// Mga task na natapos mula [from] hanggang [to] (kasama pareho, ayon sa
+  /// petsa ng completed_at), luma → bago. Galing sa completion_history,
+  /// kaya kasama pa rin ang mga na-delete na task.
+  /// Para sa "ano ginawa ko kahapon?" at Memory Engine.
+  Future<List<CompletedTask>> getCompleted({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final db = await ZoeDatabase.instance.database;
+    final rows = await db.query(
+      _history,
+      where: 'item_type = ? AND substr(completed_at, 1, 10) >= ? '
+          'AND substr(completed_at, 1, 10) <= ?',
+      whereArgs: [_itemType, ZoeDate.key(from), ZoeDate.key(to)],
+      orderBy: 'completed_at ASC',
+    );
+    return [
+      for (final r in rows)
+        (
+          taskId: r['item_id'] as int,
+          title: r['title'] as String,
+          completedAt: DateTime.parse(r['completed_at'] as String),
+        ),
+    ];
   }
 
   /// How many times this task was completed (used by tests / stats later).

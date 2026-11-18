@@ -4,9 +4,11 @@ import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:zoe_remind/ai/parser/crisis_guard.dart';
 import 'package:zoe_remind/ai/parser/intent_classifier.dart';
 import 'package:zoe_remind/ai/parser/intent_rules.dart';
+import 'package:zoe_remind/ai/parser/when_parser.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/note.dart';
+import 'package:zoe_remind/database/models/reminder_occurrence.dart';
 import 'package:zoe_remind/database/repositories/note_repository.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
@@ -20,6 +22,8 @@ import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/companion/models/mood_week.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
+import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
+import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
@@ -36,6 +40,10 @@ import 'package:zoe_remind/features/companion/models/user_tone.dart';
 ///   7. Mood log (Level 2): binibilang ang tone (hindi ang mensahe) sa
 ///      huling 7 araw. Kapag 3+ araw nang pagod / stressed, minsan isang araw
 ///      sasabihin ni Zoe: "Mukhang busy ang linggo mo…" bago ang feeling script.
+///   8. Mga tanong tungkol sa nakaraan ("ano na-miss ko?", "ano ginawa ko
+///      kahapon?") → binabasa ang HISTORY tables (reminder_occurrences,
+///      task_history, completion_history), hindi ang kasalukuyang estado.
+///      Dito rin babasa ang RAG / Memory Engine.
 ///
 /// Nararamdaman (2c):
 ///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
@@ -68,6 +76,8 @@ class ChatPreviewBrain {
     void Function(ZoeEvent event)? onMoodEvent,
     void Function(UserTone tone)? onTone,
     Future<WeekVibe?> Function(UserTone tone)? weekNote,
+    DateTime Function()? clock,
+    Future<Map<int, DateTime>> Function()? activeAlarms,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
         _notes = notes ?? NoteRepository(),
@@ -75,7 +85,9 @@ class ChatPreviewBrain {
         _moodOf = mood ?? (() => MoodNow.current),
         _report = onMoodEvent ?? MoodController.instance.add,
         _logTone = onTone ?? MoodLog.instance.record,
-        _weekNote = weekNote ?? MoodLog.instance.noteFor;
+        _weekNote = weekNote ?? MoodLog.instance.noteFor,
+        _clock = clock ?? DateTime.now,
+        _activeAlarms = activeAlarms ?? ReminderAlarmService.instance.activeAlarmOccurrences;
 
   /// true = gumagana ang chat (keywords) kahit walang naka-download na model.
   static const enabled = true;
@@ -96,6 +108,16 @@ class ChatPreviewBrain {
 
   /// May sasabihin ba tungkol sa linggo? (isang beses kada araw). Default: MoodLog.
   final Future<WeekVibe?> Function(UserTone tone) _weekNote;
+
+  /// Oras ngayon. Sa test: pwedeng ipasa ang sariling oras.
+  final DateTime Function() _clock;
+
+  /// Mga alarm na naka-snooze / nagri-ring (para hindi agad "Missed").
+  /// Default: ReminderAlarmService. Sa test: pwedeng ipasa.
+  final Future<Map<int, DateTime>> Function() _activeAlarms;
+
+  /// "ano na-miss ko?" = ilang araw pabalik (kasama ngayon).
+  static const missedDays = 7;
 
   ZoeLanguage _lang = ZoeLanguage.both;
 
@@ -235,7 +257,9 @@ class ChatPreviewBrain {
       case ZoeIntent.createTask:
         return [_task(text, lower)];
       case ZoeIntent.getDone:
-        final day = has(['kahapon', 'yesterday']) ? _daysAgo(1) : _pastWeekday(lower);
+        final day = has(['kahapon', 'yesterday'])
+            ? _daysAgo(1)
+            : WhenParser.pastDay(lower, now: _now());
         return [await _doneOn(day ?? _daysAgo(1))];
       case ZoeIntent.getMissed:
         return [await _missed()];
@@ -264,8 +288,8 @@ class ChatPreviewBrain {
     var day = _day(lower);
     // May oras pero walang araw → today, o bukas kung lumipas na ang oras.
     if (day == null && time != null) {
-      final later = ZoeDate.combine(_today0, time).isAfter(DateTime.now());
-      day = later ? _today0 : _today0.add(const Duration(days: 1));
+      final later = ZoeDate.combine(_today0, time).isAfter(_now());
+      day = later ? _today0 : _daysAgo(-1);
     }
     var title = _cleanTitle(text);
     // "wake me up at 6am" → walang natirang title, pero malinaw ang ibig sabihin.
@@ -285,7 +309,7 @@ class ChatPreviewBrain {
     if (d.time == null) {
       return ClarifyEntry(
         question: _say(ZoeSituation.askTime),
-        reminder: d.copyWith(date: d.date ?? _today0.add(const Duration(days: 1))),
+        reminder: d.copyWith(date: d.date ?? _daysAgo(-1)),
         chips: [
           const ClarifyChip('8 AM', TimeOfDay(hour: 8, minute: 0)),
           const ClarifyChip('12 PM', TimeOfDay(hour: 12, minute: 0)),
@@ -484,12 +508,18 @@ class ChatPreviewBrain {
     );
   }
 
+  /// "ano ginawa ko kahapon?" — galing sa HISTORY:
+  ///   tasks     → completion_history (kasama ang na-delete na task)
+  ///   reminders → reminder_occurrences na 'done' sa araw na iyon
+  ///               (kaya kasama pa rin ang daily reminder kahit na-done ulit ngayon)
   Future<ChatEntry> _doneOn(DateTime day) async {
-    final tasks = (await _tasks.getAll())
-        .where((t) => t.isDone && t.completedAtTime != null && ZoeDate.sameDay(t.completedAtTime!, day))
-        .toList();
-    final reminders = (await _reminders.getForDay(day)).where((r) => r.isDoneOn(day)).toList();
-    final names = [...tasks.map((t) => t.title), ...reminders.map((r) => r.title)];
+    final tasks = await _tasks.getCompleted(from: day, to: day);
+    final reminders = await _reminders.getOccurrences(
+      from: day,
+      to: day,
+      status: OccurrenceStatus.done,
+    );
+    final names = _unique([...tasks.map((t) => t.title), ...reminders.map((o) => o.title)]);
 
     return AnswerEntry(
       assumption: 'Assuming ${ZoeDate.pretty(day)}',
@@ -506,133 +536,105 @@ class ChatPreviewBrain {
     );
   }
 
+  /// "ano na-miss ko?" — huling [missedDays] araw (kasama ngayon), tasks + reminders.
+  /// Galing sa HISTORY:
+  ///   tasks     → task_history na 'missed'
+  ///   reminders → reminder_occurrences na 'missed' (mga lumipas na araw)
+  ///               + ngayong araw: lumipas na ang oras, walang Done / Dismiss /
+  ///               Snooze (parehong patakaran ng Home)
   Future<ChatEntry> _missed() async {
-    final now = DateTime.now();
-    final missed = (await _tasks.getAll()).where((t) => t.isMissedAt(now)).toList();
+    final now = _now();
+    final today = _today0;
+    final from = _daysAgo(missedDays - 1);
+
+    var active = const <int, DateTime>{};
+    try {
+      active = await _activeAlarms();
+    } catch (_) {
+      active = const {};
+    }
+    // I-record muna ang mga bagong missed (gaya ng Home / History screen).
+    // Kapag pumalya, tuloy pa rin — babasahin ang naka-record na.
+    try {
+      await _reminders.recordMissed(pending: active, now: now);
+      await _tasks.recordMissed(now: now);
+    } catch (_) {}
+
+    // (araw, title) — para maayos mula pinakabago.
+    final items = <(String, String)>[];
+
+    final tasks = await _tasks.getMissed(from: ZoeDate.key(from), to: ZoeDate.key(today));
+    for (final row in tasks) {
+      items.add((row['day'] as String, row['title'] as String));
+    }
+
+    final past = await _reminders.getOccurrences(
+      from: from,
+      to: _daysAgo(1),
+      status: OccurrenceStatus.missed,
+    );
+    var reminderCount = past.length;
+    for (final o in past) {
+      items.add((o.day, o.title));
+    }
+
+    for (final r in await _reminders.getForDay(today)) {
+      final at = ReminderStatusRules.occurrenceTime(r, today);
+      final pendingAt = active[r.id];
+      final alarmPending = pendingAt != null && _sameMinute(pendingAt, at);
+      final status =
+          ReminderStatusRules.statusOn(r, today, now: now, alarmPending: alarmPending);
+      if (status == ReminderStatus.missed) {
+        reminderCount++;
+        items.add((ZoeDate.key(today), r.title));
+      }
+    }
+
+    // Pinakabago muna. Isang beses lang bawat title sa text.
+    items.sort((a, b) => b.$1.compareTo(a.$1));
+    final names = _unique(items.map((e) => e.$2));
+    final range = '${ZoeDate.short(from)}–${ZoeDate.short(today)}';
+
     return AnswerEntry(
-      assumption: _t('Assuming the last 7 days', 'Assuming last 7 days'),
-      text: missed.isEmpty
+      assumption: _t('Last $missedDays days ($range)', 'Huling $missedDays araw ($range)'),
+      text: names.isEmpty
           ? _say(ZoeSituation.missedNone)
-          : _say(ZoeSituation.missedList,
-              {'items': missed.take(4).map((t) => t.title).join(', ')}),
+          : _say(ZoeSituation.missedList, {'items': names.take(4).join(', ')}),
       rows: [
-        if (missed.isNotEmpty)
-          AnswerRow(AnswerTone.missed, '${missed.length} missed ${_plural(missed.length, 'task')}'),
+        if (tasks.isNotEmpty)
+          AnswerRow(AnswerTone.missed, '${tasks.length} missed ${_plural(tasks.length, 'task')}'),
+        if (reminderCount > 0)
+          AnswerRow(AnswerTone.missed,
+              '$reminderCount missed ${_plural(reminderCount, 'reminder')}'),
       ],
     );
   }
 
   // ───────────────────────── Helpers ─────────────────────────
 
-  DateTime get _today0 => ZoeDate.dayOnly(DateTime.now());
-  DateTime _daysAgo(int n) => _today0.subtract(Duration(days: n));
+  DateTime _now() => _clock();
+  DateTime get _today0 => ZoeDate.dayOnly(_now());
+
+  /// [n] araw bago ngayon (negative = mga araw pagkatapos: -1 = bukas).
+  DateTime _daysAgo(int n) => DateTime(_today0.year, _today0.month, _today0.day - n);
   String _plural(int n, String word) => n == 1 ? word : '${word}s';
 
-  static const _weekdays = {
-    'monday': 1, 'lunes': 1,
-    'tuesday': 2, 'martes': 2,
-    'wednesday': 3, 'miyerkules': 3,
-    'thursday': 4, 'huwebes': 4,
-    'friday': 5, 'biyernes': 5,
-    'saturday': 6, 'sabado': 6,
-    'sunday': 7, 'linggo': 7,
-  };
+  /// Walang ulit, pareho ang pagkakasunod.
+  static List<String> _unique(Iterable<String> names) => names.toSet().toList();
 
-  /// Walang "may" (Tagalog: "may 5 akong gagawin") — "mayo" ang gamitin.
-  static const _months = {
-    'january': 1, 'jan': 1, 'enero': 1,
-    'february': 2, 'feb': 2, 'pebrero': 2,
-    'march': 3, 'mar': 3, 'marso': 3,
-    'april': 4, 'apr': 4, 'abril': 4,
-    'mayo': 5,
-    'june': 6, 'jun': 6, 'hunyo': 6,
-    'july': 7, 'jul': 7, 'hulyo': 7,
-    'august': 8, 'aug': 8, 'agosto': 8,
-    'september': 9, 'sept': 9, 'sep': 9, 'setyembre': 9,
-    'october': 10, 'oct': 10, 'oktubre': 10,
-    'november': 11, 'nov': 11, 'nobyembre': 11,
-    'december': 12, 'dec': 12, 'disyembre': 12,
-  };
+  static bool _sameMinute(DateTime a, DateTime b) =>
+      a.year == b.year &&
+      a.month == b.month &&
+      a.day == b.day &&
+      a.hour == b.hour &&
+      a.minute == b.minute;
 
-  /// "feb 12", "Feb. 12, 2028", "disyembre 5" — buwan + araw (+ taon).
-  static final _monthDatePattern =
-      '\\b(${_months.keys.join('|')})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b';
-
-  /// Walang taon at lumipas na ngayong taon → susunod na taon.
-  DateTime? _monthDate(String lower) {
-    final m = RegExp(_monthDatePattern).firstMatch(lower);
-    if (m == null) return null;
-    final month = _months[m.group(1)!]!;
-    final dayNum = int.parse(m.group(2)!);
-    final year = int.tryParse(m.group(3) ?? '');
-    var date = DateTime(year ?? _today0.year, month, dayNum);
-    if (date.month != month) return null; // hal. "feb 31"
-    if (year == null && date.isBefore(_today0)) {
-      date = DateTime(_today0.year + 1, month, dayNum);
-    }
-    return date;
-  }
-
-  DateTime? _day(String lower) {
-    final exact = _monthDate(lower);
-    if (exact != null) return exact;
-    if (lower.contains('tomorrow') || lower.contains('bukas')) {
-      return _today0.add(const Duration(days: 1));
-    }
-    if (RegExp(r'\b(today|ngayon|ngayong|mamaya|mamayang|tonight|later)\b').hasMatch(lower)) {
-      return _today0;
-    }
-    for (final e in _weekdays.entries) {
-      if (RegExp('\\b${e.key}\\b').hasMatch(lower)) {
-        var ahead = (e.value - _today0.weekday + 7) % 7;
-        if (ahead == 0) ahead = 7; // "on Monday" = susunod na Monday
-        return _today0.add(Duration(days: ahead));
-      }
-    }
-    return null;
-  }
-
-  /// "last Monday" / "noong Lunes" → pinakahuling Monday bago ngayon.
-  DateTime? _pastWeekday(String lower) {
-    for (final e in _weekdays.entries) {
-      if (RegExp('\\b${e.key}\\b').hasMatch(lower)) {
-        var back = (_today0.weekday - e.value + 7) % 7;
-        if (back == 0) back = 7;
-        return _today0.subtract(Duration(days: back));
-      }
-    }
-    return null;
-  }
+  /// Araw sa mensahe ("bukas", "sa Biyernes", "sa susunod na linggo"…). Tingnan ang WhenParser.
+  DateTime? _day(String lower) => WhenParser.day(lower, now: _now());
 
   /// "7 PM", "7:30pm", "alas 7 ng gabi", "19:00", "noon" → TimeOfDay.
-  TimeOfDay? parseTime(String lower) {
-    final ampm = RegExp(r'\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)').firstMatch(lower);
-    if (ampm != null) {
-      final h = int.parse(ampm.group(1)!);
-      final m = int.tryParse(ampm.group(2) ?? '') ?? 0;
-      if (h < 1 || h > 12 || m > 59) return null;
-      final pm = ampm.group(3)!.startsWith('p');
-      return TimeOfDay(hour: h % 12 + (pm ? 12 : 0), minute: m);
-    }
-    // "alas 7 ng gabi", "alas-8 ng umaga"
-    final alas = RegExp(r'\balas[\s-]*(\d{1,2})(?::(\d{2}))?').firstMatch(lower);
-    if (alas != null) {
-      final h = int.parse(alas.group(1)!);
-      final m = int.tryParse(alas.group(2) ?? '') ?? 0;
-      if (h < 1 || h > 12 || m > 59) return null;
-      final pm = lower.contains('gabi') || lower.contains('hapon');
-      return TimeOfDay(hour: h % 12 + (pm ? 12 : 0), minute: m);
-    }
-    // "at 19:30"
-    final h24 = RegExp(r'\b([01]?\d|2[0-3]):([0-5]\d)\b').firstMatch(lower);
-    if (h24 != null) {
-      return TimeOfDay(hour: int.parse(h24.group(1)!), minute: int.parse(h24.group(2)!));
-    }
-    if (RegExp(r'\b(noon|tanghali)\b').hasMatch(lower)) {
-      return const TimeOfDay(hour: 12, minute: 0);
-    }
-    return null;
-  }
+  /// (Ginagamit din ng ZoeChatController sa chips na "Iba pa".)
+  TimeOfDay? parseTime(String lower) => WhenParser.time(lower);
 
   /// "Zoe, remind me tomorrow at 7 PM to review my thesis" → "Review my thesis"
   String _cleanTitle(String text) {
@@ -652,18 +654,26 @@ class ChatPreviewBrain {
       r'\b(pa)?gawan\s+mo\s+(ako|ko)(\s+ng)?\b',
       r'\b(ang\s+)?title\s*(ay|is|:)?',
       r'\b(time|oras)\s*(ay|is|:)?\s*(?=\d)',
-      '\\b(on|sa|ng|noong)?\\s*$_monthDatePattern',
+      '\\b(on|sa|ng|noong)?\\s*${WhenParser.monthDatePattern}',
       r'\b(pa)?paalala(han)?\s+mo\s+(ako|ko)\b',
       r'\bipaalala\s+mo(\s+sa\s+akin)?\b',
       r'\bset\s+(an?\s+)?(alarm|reminder)\b',
       r'\b(add|create|new)\s+(an?\s+)?(task|todo|to-do)\b',
       r'\b(task|todo|to-do|gawain)\b[:]?',
-      r'\b((at|by|sa|ng|mga)\s+)*\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)',
+      // "\b" pagkatapos ng am/pm: ang "5 ampalaya" ay hindi oras.
+      r'\b((at|by|sa|ng|mga)\s+)*\d{1,2}(:\d{2})?\s*(am\b|pm\b|a\.m\.|p\.m\.)',
+      // "5 ng hapon", "alas 3 ng madaling araw"
+      r'\b((at|sa|mga)\s+)?(alas[\s-]*)?\d{1,2}(:\d{2})?\s+(ng|sa)\s+(umaga|tanghali|hapon|gabi|madaling[\s-]?araw)\b',
       r'\b(at|sa)?\s*alas[\s-]*\d{1,2}(:\d{2})?',
       r'\b(at|by)?\s*([01]?\d|2[0-3]):[0-5]\d\b',
-      r'\bng\s+(umaga|gabi|hapon|tanghali)\b',
+      r'\bng\s+(umaga|gabi|hapon|tanghali|madaling[\s-]?araw)\b',
+      r'\b(at\s+)?(midnight|hatinggabi|hating-gabi)\b',
       r'\b(at\s+)?(noon|tanghali)\b',
-      r'\b(tomorrow|bukas|today|ngayon|ngayong|mamaya|mamayang|tonight|later)\b',
+      // "sa susunod na linggo" / "next week" — linggo = week, hindi Sunday
+      r'\b(sa\s+)?(susunod|sunod|darating)\s+na\s+linggo\b',
+      r'\b(ngayong|nitong)\s+linggo\b',
+      r'\b(next|this)\s+week\b',
+      r'\b(tomorrow|bukas|kinabukasan|today|ngayon|ngayong|mamaya|mamayang|tonight|later)\b',
       r'\b(on|by|sa|this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|huwebes|biyernes|sabado|linggo)\b',
     ]) {
       s = s.replaceAll(RegExp(p, caseSensitive: false), ' ');

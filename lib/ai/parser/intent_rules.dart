@@ -21,6 +21,7 @@ class _Rule {
 /// `flutter test test/ai/intent_rules_test.dart` kahit walang phone.
 ///
 /// Mahalaga ang PAGKAKASUNOD ng rules: ang unang tumama ang panalo.
+///   0. Tanong tungkol sa sariling listahan   "ano mga reminders ko?" (hindi gagawa)
 ///   1. Malinaw na utos (note / reminder)      "i-note mo…", "gisingin mo ako…"
 ///   2. Tanong tungkol sa na-save              "naaalala mo ba…"
 ///   3. "Tandaan mo…"                          → note
@@ -45,7 +46,36 @@ class IntentRules {
   static String _clean(String text) =>
       text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 
+  /// Mga reminder / task / alarm (para sa tanong tungkol sa sariling listahan).
+  static const _items = r'\b(reminders?|alarms?|tasks?|to-?dos?|gawain|paalala)\b';
+
+  /// Utos na gumawa — kapag meron nito, HINDI ito tanong tungkol sa listahan.
+  /// "pwede mo ba akong i-remind…", "can you set a reminder…"
+  static const _create = r'\bremind (me|ako|mo)\b|\b(i|pa|ipa)-?remind\b|\bset\b|\b(mag|i)-?set\b'
+      r'|\badd\b|\b(mag|i)-?add\b|\bcreate\b|\bmake\b|\bgumawa\b|\bgawa(n|in)? (mo|ka)\b'
+      r'|\bgisingin\b|\bwake me\b|\bpaalalahanan\b|\bipaalala\b';
+
+  /// Na-miss / hindi nagawa.
+  static const _missedWords = r'\b(na-?)?miss(ed)?\b|nakalimutan|nalimutan|nakaligtaan'
+      r'|nalampasan|nalagpasan|overdue|\bskipped\b|\b(hindi|di) ko (pa )?(na)?gawa\b';
+
+  /// Natapos / nagawa.
+  static const _doneWords =
+      r'\b(natapos|tapos|nagawa|ginawa|done|finished|completed|accomplished)\b';
+
   static final _rules = <_Rule>[
+    // 0) TANONG tungkol sa sariling reminders / tasks → sagot, HINDI bagong item.
+    //    "ano mga reminders ko bukas?", "may alarm ba ako bukas?",
+    //    "anong tasks ko today?", "may na-miss ba akong reminder?"
+    //    Pero "pwede mo ba akong i-remind…" → reminder pa rin (may [_create]).
+    _Rule(ZoeIntent.getMissed, '^(?!.*($_create))(?=.*$_items)(?=.*($_missedWords))',
+        questionOnly: true),
+    _Rule(ZoeIntent.getDone, '^(?!.*($_create))(?=.*$_items)(?=.*$_doneWords)',
+        questionOnly: true),
+    _Rule(ZoeIntent.getToday, '^(?!.*($_create))(?=.*$_items)', questionOnly: true),
+    // "show my reminders", "ipakita mo ang mga task ko" (utos, hindi tanong)
+    _Rule(ZoeIntent.getToday, '^(?!.*($_create)).*\\b(show|list|ipakita|pakita)\\b.*$_items'),
+
     // 1) Malinaw na utos na mag-note.
     _Rule(ZoeIntent.createNote, r'i-?note|i-?save|\bas (a )?note\b|\bnote:|\b(add|new) (a )?note\b'),
 
@@ -83,7 +113,12 @@ class IntentRules {
         statementOnly: true),
 
     // 8) Ano ang na-miss.
-    _Rule(ZoeIntent.getMissed, r'\b(na-?)?miss(ed)?\b|nakalimutan|nalimutan|nakaligtaan'),
+    //    "na-miss" / "missed" lang — ang "miss" na mag-isa ay pangungulila
+    //    ("i miss my mom", "miss ko na si mama"), hindi tanong tungkol sa tasks.
+    //    "na-miss kita" / "I missed you" → bati (sa 12).
+    _Rule(ZoeIntent.getMissed,
+        r"\b(na-?miss|missed)\b(?! (na )?(kita|ka|you|ya|u|me|mo (ba )?ako)\b)|nakalimutan"
+        r'|nalimutan|nakaligtaan'),
     _Rule(ZoeIntent.getMissed, r'nalampasan|nalagpasan|overdue'),
     _Rule(ZoeIntent.getMissed, r'\b(hindi|di) ko (pa )?(na)?gawa\b'),
     _Rule(ZoeIntent.getMissed, r'\bdid i (forget|miss|skip)\b|\banything i (forgot|missed|skipped)\b'),
@@ -116,6 +151,7 @@ class IntentRules {
     _Rule(ZoeIntent.greeting, r'\bgood (morning|afternoon|evening|night|day)\b'),
     _Rule(ZoeIntent.greeting, r'\bmagandang (umaga|tanghali|hapon|gabi|araw)\b'),
     _Rule(ZoeIntent.greeting, r'\bgising ka (pa|na)\b|\b(nandyan|andyan|nandiyan) ka\b'),
+    _Rule(ZoeIntent.greeting, r'\b(na-?)?miss(ed)? (na )?(kita|ka|you|ya|u|me|mo (ba )?ako)\b'),
   ];
 
   /// Ang hula ng code. [ZoeIntent.unknown] = walang tumama (ipasa kay Qwen).

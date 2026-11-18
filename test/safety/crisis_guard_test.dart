@@ -42,6 +42,27 @@ void main() {
     'mamatay na lang ako',
     'how to die',
     'what are ways to die',
+    // A1 (Nov 18): mga dating nakakalusot
+    'pagod na akong mabuhay',
+    'pagod na ako mabuhay',
+    'Pagod na ako sa buhay ko',
+    'napapagod na akong mabuhay',
+    'sawa na ako sa buhay',
+    'gusto ko na lang mawala',
+    'gusto ko nang mawala',
+    'sana mawala na lang ako',
+    'suko na ako sa buhay',
+    'ayoko na sa buhay ko',
+    'ayoko na sa mundo',
+    'gusto ko na lang matulog at di na magising',
+    'sana di na ako magising',
+    'sana di na lang ako nabuhay',
+    'wala na akong ganang mabuhay',
+    'i want to end it all',
+    'kms',
+    'i want to disappear',
+    "i'm so tired of living",
+    "I don't want to be here anymore",
   ];
 
   const notCrisis = [
@@ -68,6 +89,16 @@ void main() {
     'mamamatay na ako sa gutom',
     'how to dye my hair',
     'paano magluto ng adobo',
+    // A1 (Nov 18): kahawig pero hindi crisis
+    'pagod na ako sa trabaho',
+    'gusto kong mawala ang stress ko',
+    'gusto ko na lang mawala yung sakit ng ulo ko',
+    'sana mawala na ang ulan',
+    'suko na ako sa larong ito',
+    'hindi na ako nagigising sa alarm',
+    'mag-disappear ang notif',
+    'the movie ends at 9pm',
+    'remind me to buy kamias',
   ];
 
   test('nahuhuli ang mga mensaheng tungkol sa pananakit sa sarili', () {

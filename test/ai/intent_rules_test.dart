@@ -100,6 +100,61 @@ void main() {
     ]);
   });
 
+  // A2 (Nov 18): tanong tungkol sa sariling reminders / tasks → sagot, hindi bagong item.
+  test('tanong tungkol sa reminders / tasks → schedule, hindi gagawa', () {
+    check(ZoeIntent.getToday, [
+      'ano mga reminders ko bukas?',
+      'ano mga reminders ko?',
+      'may alarm ba ako bukas?',
+      'anong tasks ko today?',
+      'ano mga tasks ko?',
+      'what are my reminders for tomorrow?',
+      'do I have any tasks today?',
+      'ilan ang task ko bukas?',
+      'anong oras ang alarm ko bukas?',
+      'show my reminders',
+    ]);
+  });
+
+  test('tanong tungkol sa na-miss / natapos na reminders / tasks', () {
+    check(ZoeIntent.getMissed, [
+      'may na-miss ba akong reminder?',
+      'did i miss any reminders?',
+      'anong tasks ang hindi ko nagawa?',
+    ]);
+    check(ZoeIntent.getDone, [
+      'ano mga natapos kong tasks kahapon?',
+      'what tasks have I completed?',
+    ]);
+  });
+
+  test('utos pa rin kahit tanong ang anyo', () {
+    check(ZoeIntent.createReminder, [
+      'pwede mo ba akong i-remind bukas ng 8am?',
+      'can you set a reminder for 5pm?',
+      'pwede ka bang mag-set ng alarm bukas 6am?',
+    ]);
+    check(ZoeIntent.createTask, [
+      'can you add a task to buy milk?',
+    ]);
+  });
+
+  test('"na-miss kita" ay hindi listahan ng missed tasks', () {
+    check(ZoeIntent.greeting, [
+      'na-miss kita',
+      'namiss kita zoe',
+      'miss na kita',
+      'I miss you Zoe',
+      'did you miss me?',
+    ]);
+  });
+
+  test('"i miss my mom" / "miss ko na si mama" ay hindi listahan ng na-miss', () {
+    for (final m in ['i miss my mom', 'miss ko na si mama', 'miss ko na sila']) {
+      expect(IntentRules.match(m), isNot(ZoeIntent.getMissed), reason: m);
+    }
+  });
+
   test('walang rule → ipapasa kay Qwen', () {
     check(ZoeIntent.unknown, [
       'sino ang presidente ng Pilipinas?',

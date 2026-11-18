@@ -45,6 +45,12 @@ void main() {
     }
   });
 
+  test('"5 ampalaya" ay hindi oras → hindi reminder, pero task pa rin', () {
+    const text = 'bumili ng 5 ampalaya';
+    expect(check(ZoeIntent.createReminder, text), ZoeIntent.unknown);
+    expect(check(ZoeIntent.createTask, text), ZoeIntent.createTask);
+  });
+
   group('Qwen create_task na MAY palatandaan → tanggap', () {
     for (final text in [
       'bibili pa ako ng gatas sa Sabado',

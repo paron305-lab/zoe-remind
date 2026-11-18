@@ -165,9 +165,10 @@ class IntentClassifier {
   );
 
   /// May oras o araw: "8am", "7:30", "alas 5", "bukas", "sa Sabado", "Feb 12".
+  /// (Ang "5 ampalaya" ay HINDI oras.)
   /// Walang "linggo" (pwedeng "week" o "Sunday") at walang "ngayon" (masyadong karaniwan).
   static final _when = RegExp(
-    r'\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)'
+    r'\b\d{1,2}(:\d{2})?\s*(am\b|pm\b|a\.m\.|p\.m\.)'
     r'|\b([01]?\d|2[0-3]):[0-5]\d\b'
     r'|\balas[\s-]*\d'
     r'|\b(umaga|tanghali|hapon|gabi|noon|tonight|mamaya|mamayang|later|bukas|tomorrow'
