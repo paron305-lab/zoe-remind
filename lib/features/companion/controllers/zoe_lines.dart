@@ -22,6 +22,20 @@ enum ZoeSituation {
   missedList,
   noteFound,
   noteNotFound,
+
+  /// RAG: ang sagot ay galing sa memories (sinabi ng user). {memory}.
+  memoryFound,
+
+  /// RAG: "tandaan mo na mas gusto ko…" pero OFF ang long-term memory →
+  /// iaalok na i-save na lang bilang note (may card pagkatapos).
+  memoryOff,
+
+  /// RAG: natapos sa loob ng ilang araw ("last week", "this month").
+  /// {range} = "Nov 9–Nov 15", {items}.
+  doneRangeList,
+
+  /// RAG: walang natapos sa loob ng {range}.
+  doneRangeNone,
   mathDivideByZero,
 
   /// Ibang araw (bukas, "sa Sabado") na walang laman. {day} = "Sat, Nov 21".
@@ -377,6 +391,32 @@ class ZoeLines {
       ZoeLanguage.both: [
         'Wala akong nakitang ganyan sa notes mo. Sabihin mo lang at ise-save ko.',
       ],
+    },
+    ZoeSituation.memoryFound: {
+      ZoeLanguage.english: ['You told me: {memory}'],
+      ZoeLanguage.tagalog: ['Sinabi mo sa akin: {memory}'],
+      ZoeLanguage.both: ['Sabi mo sa akin: {memory}'],
+    },
+    ZoeSituation.memoryOff: {
+      ZoeLanguage.english: [
+        "Long-term memory is off, so I won't remember that. I can save it as a note instead:",
+      ],
+      ZoeLanguage.tagalog: [
+        'Naka-OFF ang long-term memory, kaya hindi ko ito maaalala. Pwede ko itong i-save bilang note:',
+      ],
+      ZoeLanguage.both: [
+        'Naka-OFF ang long-term memory, kaya di ko ito maaalala. I-save ko na lang as note:',
+      ],
+    },
+    ZoeSituation.doneRangeList: {
+      ZoeLanguage.english: ['From {range}, you finished: {items}.'],
+      ZoeLanguage.tagalog: ['Mula {range}, natapos mo: {items}.'],
+      ZoeLanguage.both: ['From {range}, natapos mo: {items}.'],
+    },
+    ZoeSituation.doneRangeNone: {
+      ZoeLanguage.english: ['I have nothing recorded as done from {range}.'],
+      ZoeLanguage.tagalog: ['Wala akong nakitang natapos mo mula {range}.'],
+      ZoeLanguage.both: ['Wala akong nakitang natapos mo from {range}.'],
     },
     ZoeSituation.mathDivideByZero: {
       ZoeLanguage.english: ["That one can't be divided by zero."],

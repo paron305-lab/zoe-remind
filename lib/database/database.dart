@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:zoe_remind/core/constants/storage_constants.dart';
@@ -27,9 +28,19 @@ class ZoeDatabase {
   ///      (id 1 = Zoe Lite, id 2 = Zoe Plus)
   /// v11: zoe_mood (mood ni Zoe, para pareho pa rin pagbukas ulit ng app)
   /// v12: mood_log (Level 2: bilang ng pagod / stressed… sa huling 7 araw)
-  static const _version = 12;
+  /// v13: notes_fts + memories_fts (FTS4) + triggers — para sa RAG.
+  ///      Ginagawa sa onOpen ([_ensureSearchIndex]), hindi sa batch, para
+  ///      kahit walang FTS4 ang isang phone ay bumubukas pa rin ang app.
+  static const _version = 13;
 
   Future<Database>? _opening;
+
+  /// true = gumagana ang FTS4 search index sa phone na ito.
+  /// false = LIKE search ang gagamitin (SearchRepository).
+  bool searchReady = false;
+
+  /// Huling error sa paggawa ng search index (para sa Developer screen).
+  String? searchError;
 
   /// Opens the database once and reuses it.
   Future<Database> get database => _opening ??= _open();
@@ -47,7 +58,109 @@ class ZoeDatabase {
         await _createAllTables(db);
         await _migrate(db, oldVersion);
       },
+      // Tuwing bubuksan: siguraduhing nandiyan at tugma ang search index.
+      onOpen: (db) async {
+        searchReady = await _ensureSearchIndex(db);
+      },
     );
+  }
+
+  // ───────────────────────── Search index (FTS4, v13) ─────────────────────────
+
+  static const _searchSpecs = [
+    _FtsSpec(
+      table: StorageConstants.notesTable,
+      fts: StorageConstants.notesFtsTable,
+      columns: ['title', 'content'],
+    ),
+    _FtsSpec(
+      table: StorageConstants.memoriesTable,
+      fts: StorageConstants.memoriesFtsTable,
+      columns: ['content'],
+    ),
+  ];
+
+  /// Gumagawa ng FTS4 tables + triggers kung wala pa, at nire-rebuild kapag
+  /// hindi tugma ang bilang ng rows (hal. unang bukas pagkatapos ng update).
+  ///
+  /// FTS4 (hindi FTS5): kasama ito sa built-in SQLite ng Android.
+  /// Default na "simple" tokenizer: maliit na titik (A–Z), hati sa bantas.
+  ///
+  /// Hindi nagt-throw: kapag pumalya (walang FTS4), false lang → LIKE search.
+  static Future<bool> _ensureSearchIndex(Database db) async {
+    try {
+      for (final spec in _searchSpecs) {
+        final existed = await _tableExists(db, spec.fts);
+        if (!existed) {
+          await db.execute(
+              'CREATE VIRTUAL TABLE IF NOT EXISTS ${spec.fts} USING fts4(${spec.columns.join(', ')})');
+        }
+        for (final sql in spec.triggerSql) {
+          await db.execute(sql);
+        }
+        if (!existed || await _count(db, spec.table) != await _count(db, spec.fts)) {
+          await _rebuild(db, spec);
+        }
+      }
+      instance.searchError = null;
+      return true;
+    } catch (e) {
+      debugPrint('Search index (FTS4) not available: $e');
+      instance.searchError = '$e';
+      return false;
+    }
+  }
+
+  /// Burahin at punuin ulit ang FTS table mula sa totoong table.
+  static Future<void> _rebuild(Database db, _FtsSpec spec) async {
+    final cols = spec.columns.join(', ');
+    await db.transaction((txn) async {
+      await txn.execute('DELETE FROM ${spec.fts}');
+      await txn.execute(
+          'INSERT INTO ${spec.fts} (docid, $cols) SELECT id, $cols FROM ${spec.table}');
+    });
+  }
+
+  static Future<bool> _tableExists(Database db, String name) async {
+    final rows = await db.rawQuery(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1", [name]);
+    return rows.isNotEmpty;
+  }
+
+  static Future<int> _count(Database db, String table) async {
+    final rows = await db.rawQuery('SELECT COUNT(*) AS n FROM $table');
+    return (rows.first['n'] as int?) ?? 0;
+  }
+
+  /// Para sa Developer screen: gumagana ba, at tugma ba ang bilang.
+  Future<SearchIndexStatus> searchIndexStatus() async {
+    final db = await database;
+    final version = await db.rawQuery('SELECT sqlite_version() AS v');
+    final counts = <String, (int, int?)>{};
+    for (final spec in _searchSpecs) {
+      final rows = await _count(db, spec.table);
+      int? indexed;
+      if (await _tableExists(db, spec.fts)) indexed = await _count(db, spec.fts);
+      counts[spec.table] = (rows, indexed);
+    }
+    return SearchIndexStatus(
+      ready: searchReady,
+      sqliteVersion: '${version.first['v']}',
+      counts: counts,
+      error: searchError,
+    );
+  }
+
+  /// Developer › "Rebuild": gawin ulit ang index (o subukan ulit kung pumalya).
+  Future<SearchIndexStatus> rebuildSearchIndex() async {
+    final db = await database;
+    searchReady = await _ensureSearchIndex(db);
+    if (searchReady) {
+      for (final spec in _searchSpecs) {
+        await _rebuild(db, spec);
+      }
+    }
+    return searchIndexStatus();
   }
 
   /// Column changes for phones that already have an older zoe.db.
@@ -76,6 +189,8 @@ class ZoeDatabase {
     if (oldVersion < 10) {
       await _rebuildModelState(db);
     }
+    // v13: walang column change. Ang notes_fts / memories_fts ay ginagawa
+    // at pinupuno sa onOpen (_ensureSearchIndex) — kasama ang lumang notes.
   }
 
   /// model_state: isang row kada model. id 1 = Zoe Lite, id 2 = Zoe Plus.
@@ -425,4 +540,51 @@ class ZoeDatabase {
 
     await batch.commit(noResult: true);
   }
+}
+
+/// Isang FTS4 mirror: [fts] ay kopya ng [columns] ng [table], docid = id.
+class _FtsSpec {
+  const _FtsSpec({required this.table, required this.fts, required this.columns});
+
+  final String table;
+  final String fts;
+  final List<String> columns;
+
+  /// Insert / update / delete sa [table] → sabay sa [fts].
+  /// Update: binubura at ini-insert ulit (gumagana kahit nawawala ang row sa
+  /// index). "UPDATE OF" — ang pin / importance lang ay hindi gumagalaw sa index.
+  List<String> get triggerSql {
+    final cols = columns.join(', ');
+    final newCols = columns.map((c) => 'new.$c').join(', ');
+    return [
+      'CREATE TRIGGER IF NOT EXISTS ${fts}_ai AFTER INSERT ON $table BEGIN '
+          'INSERT INTO $fts (docid, $cols) VALUES (new.id, $newCols); END',
+      'CREATE TRIGGER IF NOT EXISTS ${fts}_au AFTER UPDATE OF $cols ON $table BEGIN '
+          'DELETE FROM $fts WHERE docid = old.id; '
+          'INSERT INTO $fts (docid, $cols) VALUES (new.id, $newCols); END',
+      'CREATE TRIGGER IF NOT EXISTS ${fts}_ad AFTER DELETE ON $table BEGIN '
+          'DELETE FROM $fts WHERE docid = old.id; END',
+    ];
+  }
+}
+
+/// Estado ng search index (Developer screen).
+class SearchIndexStatus {
+  const SearchIndexStatus({
+    required this.ready,
+    required this.sqliteVersion,
+    required this.counts,
+    this.error,
+  });
+
+  /// true = FTS4 ang ginagamit; false = LIKE.
+  final bool ready;
+  final String sqliteVersion;
+
+  /// table → (bilang ng rows, bilang sa index o null kung walang index).
+  final Map<String, (int, int?)> counts;
+  final String? error;
+
+  /// Tugma lahat ng bilang.
+  bool get inSync => counts.values.every((c) => c.$2 == c.$1);
 }

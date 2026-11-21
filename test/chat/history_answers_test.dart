@@ -17,6 +17,7 @@ import 'package:zoe_remind/features/companion/models/mood_state.dart';
 /// A4: "ano na-miss ko?" at "ano ginawa ko kahapon?" ay galing sa HISTORY
 /// (task_history, reminder_occurrences, completion_history), hindi sa
 /// kasalukuyang estado. Walang database dito — fake repositories.
+/// B4: saklaw — "last week", "this week", "ano mga tasks ko kahapon?".
 
 /// Hindi tinatawag si Qwen sa test.
 class _NoQwen extends IntentClassifier {
@@ -231,6 +232,71 @@ void main() {
       expect(a.text, contains('Iba pang task'));
       expect(a.text, isNot(contains('Review thesis')));
       expect(a.assumption, contains('Nov 16, 2026'));
+    });
+  });
+
+  group('B4: saklaw ng araw', () {
+    final tasks = _FakeTasks(
+      missed: [
+        {'task_id': 1, 'title': 'Labada', 'day': '2026-11-16', 'time': '10:00', 'status': 'missed'},
+        {'task_id': 2, 'title': 'Lumang task', 'day': '2026-11-05', 'time': null, 'status': 'missed'},
+      ],
+      completed: [
+        (taskId: 3, title: 'Review thesis', completedAt: DateTime(2026, 11, 17, 10, 0)),
+        (taskId: 4, title: 'Iba pang task', completedAt: DateTime(2026, 11, 16, 21, 0)),
+        (taskId: 5, title: 'Noong isang linggo', completedAt: DateTime(2026, 11, 12, 9, 0)),
+      ],
+    );
+    final reminders = _FakeReminders(
+      occurrences: [
+        occurrence(10, 'Bayad kuryente', '2026-11-15', OccurrenceStatus.missed),
+        occurrence(11, 'Lumang reminder', '2026-11-10', OccurrenceStatus.missed),
+        occurrence(12, 'Inom gamot', '2026-11-17', OccurrenceStatus.done),
+        occurrence(12, 'Inom gamot', '2026-11-18', OccurrenceStatus.done),
+      ],
+      reminders: [reminder(1, 'Tawag kay mama', '2026-11-18', '09:00')],
+    );
+
+    test('"ano na-miss ko last week?" → Nov 9–15 lang (walang ngayong araw)', () async {
+      final a = await ask(brainWith(tasks: tasks, reminders: reminders), 'ano na-miss ko last week?');
+      expect(a.assumption, 'Nakaraang linggo (Nov 9–Nov 15)');
+      expect(a.text, contains('Bayad kuryente'));
+      expect(a.text, contains('Lumang reminder'));
+      expect(a.text, isNot(contains('Labada'))); // Nov 16 = ngayong linggo
+      expect(a.text, isNot(contains('Tawag kay mama'))); // ngayon
+      expect(a.rows.map((r) => r.label), ['2 missed reminders']);
+    });
+
+    test('"ano natapos ko this week?" → Nov 16–18, doneRangeList', () async {
+      final a = await ask(brainWith(tasks: tasks, reminders: reminders), 'ano natapos ko this week?');
+      expect(a.assumption, 'Ngayong linggo (Nov 16–Nov 18)');
+      expect(a.text, startsWith('Mula Nov 16–Nov 18, natapos mo:'));
+      expect(a.text, contains('Review thesis'));
+      expect(a.text, contains('Iba pang task'));
+      expect(a.text, contains('Inom gamot'));
+      expect(a.text, isNot(contains('Noong isang linggo')));
+      expect('Inom gamot'.allMatches(a.text), hasLength(1)); // isang beses lang
+      expect(a.rows.map((r) => r.label), ['2 tasks completed', '2 reminders done']);
+    });
+
+    test('"ano mga tasks ko kahapon?" → history (natapos + na-miss), hindi schedule', () async {
+      final a = await ask(brainWith(tasks: tasks, reminders: reminders), 'ano mga tasks ko kahapon?');
+      expect(a.assumption, 'Assuming Nov 17, 2026');
+      expect(a.text, contains('Review thesis'));
+    });
+
+    test('"ano gagawin ko sa lunes?" → schedule ng SUSUNOD na Lunes', () async {
+      final a = await ask(brainWith(tasks: tasks, reminders: reminders), 'ano gagawin ko sa lunes?');
+      expect(a.assumption, 'Assuming Nov 23, 2026');
+    });
+
+    test('marami → "at N pa"', () async {
+      final many = _FakeTasks(completed: [
+        for (var i = 1; i <= 6; i++)
+          (taskId: i, title: 'Task $i', completedAt: DateTime(2026, 11, 17, 8, i)),
+      ]);
+      final a = await ask(brainWith(tasks: many), 'ano ginawa ko kahapon?');
+      expect(a.text, contains('at 2 pa'));
     });
   });
 

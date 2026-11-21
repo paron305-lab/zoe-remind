@@ -72,6 +72,16 @@ class TaskDraft {
       );
 }
 
+/// "tandaan mo na mas gusto ko ng morning reminders" → long-term memory.
+/// Sine-save lang pagkatapos ng Accept, at kapag ON ang long-term memory.
+class MemoryDraft {
+  const MemoryDraft({required this.content});
+
+  final String content;
+
+  MemoryDraft copyWith({String? content}) => MemoryDraft(content: content ?? this.content);
+}
+
 class NoteDraft {
   const NoteDraft({this.title = '', required this.content});
 

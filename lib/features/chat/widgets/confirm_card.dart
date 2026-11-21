@@ -30,18 +30,21 @@ class ConfirmCard extends StatelessWidget {
         DraftKind.reminder => 'Create this reminder?',
         DraftKind.task => 'Add this task?',
         DraftKind.note => 'Save this note?',
+        DraftKind.memory => 'Remember this?',
       };
 
   String get _savedLabel => switch (entry.kind) {
         DraftKind.reminder => 'Reminder saved',
         DraftKind.task => 'Task added',
         DraftKind.note => 'Note saved',
+        DraftKind.memory => 'Zoe will remember',
       };
 
   String get _title => switch (entry.kind) {
         DraftKind.reminder => entry.reminder!.title,
         DraftKind.task => entry.task!.title,
         DraftKind.note => Note.titleFrom(entry.note!.title, entry.note!.content),
+        DraftKind.memory => Note.titleFrom('', entry.memory!.content),
       };
 
   @override
@@ -136,6 +139,7 @@ class ConfirmCard extends StatelessWidget {
         DraftKind.reminder => 'View in Home',
         DraftKind.task => 'View in Tasks',
         DraftKind.note => 'View note',
+        DraftKind.memory => "View Zoe's memories",
       };
 
   Widget _details() {
@@ -172,6 +176,25 @@ class ConfirmCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
           ),
           child: Text(d.content, maxLines: 4, overflow: TextOverflow.ellipsis, style: ChatText.cardMeta),
+        );
+      case DraftKind.memory:
+        // Buong memory (hindi pinuputol) + saan ito makikita.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (entry.memory!.content.length > 60)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ChatColors.detailFill,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(entry.memory!.content, style: ChatText.cardMeta),
+              ),
+            _Meta(Icons.auto_awesome_outlined, "Settings › Zoe's memories"),
+          ],
         );
     }
   }

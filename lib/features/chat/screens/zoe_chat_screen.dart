@@ -18,6 +18,7 @@ import 'package:zoe_remind/features/chat/widgets/confirm_card.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 import 'package:zoe_remind/features/reminders/widgets/new_reminder_widgets.dart';
+import 'package:zoe_remind/memory/memory_rules.dart';
 
 /// Zoe Chat tab.
 ///
@@ -87,6 +88,13 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
       case DraftKind.note:
         final draft = await showNoteDraftSheet(context, e.note!);
         if (draft != null) _chat.updateNote(e, draft);
+      case DraftKind.memory:
+        final draft = await showNoteDraftSheet(
+          context,
+          NoteDraft(content: e.memory!.content),
+          memory: true,
+        );
+        if (draft != null) _chat.updateMemory(e, MemoryDraft(content: draft.content));
     }
   }
 
@@ -107,6 +115,8 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
         context.go('/tasks');
       case DraftKind.note:
         if (e.savedId != null) context.push('/notes/edit/${e.savedId}');
+      case DraftKind.memory:
+        context.push('/settings/memories');
     }
   }
 
@@ -303,7 +313,8 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
 }
 
 /// Note card [Edit] → bottom sheet (title + content). Hindi pa nase-save.
-Future<NoteDraft?> showNoteDraftSheet(BuildContext context, NoteDraft draft) {
+/// [memory] = Memory card [Edit]: walang title, hanggang 300 letra.
+Future<NoteDraft?> showNoteDraftSheet(BuildContext context, NoteDraft draft, {bool memory = false}) {
   return showModalBottomSheet<NoteDraft>(
     context: context,
     isScrollControlled: true,
@@ -311,13 +322,14 @@ Future<NoteDraft?> showNoteDraftSheet(BuildContext context, NoteDraft draft) {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
-    builder: (_) => _NoteDraftSheet(draft: draft),
+    builder: (_) => _NoteDraftSheet(draft: draft, memory: memory),
   );
 }
 
 class _NoteDraftSheet extends StatefulWidget {
   final NoteDraft draft;
-  const _NoteDraftSheet({required this.draft});
+  final bool memory;
+  const _NoteDraftSheet({required this.draft, this.memory = false});
 
   @override
   State<_NoteDraftSheet> createState() => _NoteDraftSheetState();
@@ -370,20 +382,22 @@ class _NoteDraftSheetState extends State<_NoteDraftSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Edit note', style: ReminderText.screenTitle),
-            const FieldLabel('Title (optional)'),
-            TextField(
-              controller: _title,
-              maxLength: Note.maxTitle,
-              textCapitalization: TextCapitalization.sentences,
-              style: ReminderText.field,
-              cursorColor: HomeColors.lavender,
-              decoration: _box('Untitled note'),
-            ),
-            const FieldLabel('Note'),
+            Text(widget.memory ? 'Edit memory' : 'Edit note', style: ReminderText.screenTitle),
+            if (!widget.memory) ...[
+              const FieldLabel('Title (optional)'),
+              TextField(
+                controller: _title,
+                maxLength: Note.maxTitle,
+                textCapitalization: TextCapitalization.sentences,
+                style: ReminderText.field,
+                cursorColor: HomeColors.lavender,
+                decoration: _box('Untitled note'),
+              ),
+            ],
+            FieldLabel(widget.memory ? 'What should Zoe remember?' : 'Note'),
             TextField(
               controller: _content,
-              maxLength: Note.maxContent,
+              maxLength: widget.memory ? MemoryRules.maxLength : Note.maxContent,
               minLines: 3,
               maxLines: 8,
               textCapitalization: TextCapitalization.sentences,

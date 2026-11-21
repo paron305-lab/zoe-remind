@@ -9,6 +9,7 @@ import 'package:zoe_remind/database/models/note.dart';
 import 'package:zoe_remind/database/models/reminder.dart';
 import 'package:zoe_remind/database/models/task.dart';
 import 'package:zoe_remind/database/repositories/chat_history_repository.dart';
+import 'package:zoe_remind/database/repositories/memory_repository.dart';
 import 'package:zoe_remind/database/repositories/note_repository.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
@@ -38,6 +39,7 @@ class ZoeChatController extends ChangeNotifier {
   final _reminders = ReminderRepository();
   final _tasks = TaskRepository();
   final _notes = NoteRepository();
+  final _memories = MemoryRepository();
 
   final List<ChatEntry> entries = [];
   ModelInfo model = ModelInfo.none;
@@ -313,6 +315,20 @@ class ZoeChatController extends ChangeNotifier {
             content: d.content,
             source: NoteSource.zoe,
           );
+        case DraftKind.memory:
+          // 'user' = sinabi mo mismo. null = OFF ang long-term memory.
+          final id = await _memories.add(e.memory!.content, source: 'user');
+          if (id == null) {
+            e.status = DraftStatus.pending;
+            entries.add(TextEntry(
+              fromZoe: true,
+              text: t('Long-term memory is off. Turn it on in Settings › Privacy & Memory.',
+                  'Naka-OFF ang long-term memory. I-ON mo sa Settings › Privacy & Memory.'),
+            ));
+            _notify();
+            return false;
+          }
+          e.savedId = id;
       }
       e.status = DraftStatus.saved;
       _notify();
@@ -360,6 +376,11 @@ class ZoeChatController extends ChangeNotifier {
         if (e.note!.content.trim().isEmpty) {
           return t('The note is empty — tap Edit.', 'Walang laman ang note — pindutin ang Edit.');
         }
+      case DraftKind.memory:
+        if (e.memory!.content.trim().isEmpty) {
+          return t('There is nothing to remember — tap Edit.',
+              'Walang laman — pindutin ang Edit.');
+        }
     }
     return null;
   }
@@ -391,6 +412,7 @@ class ZoeChatController extends ChangeNotifier {
             );
           }
         case DraftKind.note:
+        case DraftKind.memory:
           break;
       }
     } catch (err) {
@@ -408,6 +430,13 @@ class ZoeChatController extends ChangeNotifier {
   void updateNote(ConfirmEntry e, NoteDraft draft) {
     if (!e.isPending) return;
     e.note = draft;
+    _notify();
+  }
+
+  /// Memory card [Edit] (bottom sheet) → palitan ang draft, pending pa rin.
+  void updateMemory(ConfirmEntry e, MemoryDraft draft) {
+    if (!e.isPending) return;
+    e.memory = draft;
     _notify();
   }
 
@@ -466,11 +495,13 @@ class ZoeChatController extends ChangeNotifier {
         DraftKind.reminder => 'Create this reminder? ${e.reminder!.title}',
         DraftKind.task => 'Add this task? ${e.task!.title}',
         DraftKind.note => 'Save this note? ${Note.titleFrom(e.note!.title, e.note!.content)}',
+        DraftKind.memory => 'Remember this? ${e.memory!.content}',
       };
 
   String _savedLine(ConfirmEntry e) => switch (e.kind) {
         DraftKind.reminder => '✓ Reminder saved: ${e.reminder!.title}',
         DraftKind.task => '✓ Task saved: ${e.task!.title}',
         DraftKind.note => '✓ Note saved: ${Note.titleFrom(e.note!.title, e.note!.content)}',
+        DraftKind.memory => '✓ Zoe will remember: ${e.memory!.content}',
       };
 }

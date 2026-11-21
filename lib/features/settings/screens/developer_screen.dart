@@ -11,9 +11,10 @@ import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 import 'package:zoe_remind/features/settings/screens/brain_test_screen.dart';
+import 'package:zoe_remind/features/settings/widgets/search_check_card.dart';
 
 /// Developer (hidden): "Alarm Check" para ma-debug ang reminders sa phone
-/// (walang logs ang release APK), at "Brain Test" para kay Qwen. Lumalabas sa Settings › About pagkatapos
+/// (walang logs ang release APK), "Brain Test" para kay Qwen, at "Search index" (RAG). Lumalabas sa Settings › About pagkatapos
 /// i-tap ang app version nang 7 beses. Route: /settings/developer
 class DeveloperScreen extends StatefulWidget {
   const DeveloperScreen({super.key});
@@ -209,6 +210,16 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
               ),
               const SizedBox(height: 8),
               _moodLogCard(),
+              const SizedBox(height: 24),
+
+              _section('8. Search index (RAG)'),
+              Text(
+                'Dapat ✅ FTS4 at pareho ang bilang ng rows at index. '
+                'Kapag ⚠️, pindutin ang Rebuild.',
+                style: TextStyle(fontFamily: 'Poppins', color: HomeColors.inkSoft),
+              ),
+              const SizedBox(height: 8),
+              const SearchCheckCard(),
             ],
           ),
         ),

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/chat/widgets/chat_bubbles.dart';
 import 'package:zoe_remind/features/chat/widgets/chat_styles.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
 
 /// Sagot sa "Ano ginawa ko noong…?" — "📅 Assuming …" chip + text + rows.
+/// Sagot galing sa notes / memories → 📝 / 💜 chip, at ang rows ay ang mga
+/// source (pindutin para buksan ang note).
 class AnswerCard extends StatelessWidget {
   final AnswerEntry entry;
   const AnswerCard({super.key, required this.entry});
@@ -24,7 +27,7 @@ class AnswerCard extends StatelessWidget {
                 color: HomeColors.skyLight,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text('📅 ${entry.assumption}', style: ChatText.pill),
+              child: Text('${_chipIcon(entry)} ${entry.assumption}', style: ChatText.pill),
             ),
             const SizedBox(height: 12),
             Text(entry.text, style: ChatText.bubble),
@@ -39,6 +42,16 @@ class AnswerCard extends StatelessWidget {
   }
 }
 
+/// 📝 kapag galing sa notes, 💜 kapag sa memories, 📅 kapag history / schedule.
+String _chipIcon(AnswerEntry e) {
+  final first = e.rows.isEmpty ? null : e.rows.first.tone;
+  return switch (first) {
+    AnswerTone.note => '📝',
+    AnswerTone.memory => '💜',
+    _ => '📅',
+  };
+}
+
 class _AnswerRowTile extends StatelessWidget {
   final AnswerRow row;
   const _AnswerRowTile(this.row);
@@ -50,19 +63,35 @@ class _AnswerRowTile extends StatelessWidget {
       AnswerTone.reminder => (Icons.notifications_none_rounded, HomeColors.coral, HomeColors.coralLight),
       AnswerTone.event => (Icons.event_note_rounded, HomeColors.sky, HomeColors.skyLight),
       AnswerTone.missed => (Icons.history_toggle_off_rounded, ChatColors.amber, ChatColors.amberLight),
+      AnswerTone.note => (Icons.sticky_note_2_outlined, HomeColors.lavender, ChatColors.cardHeader),
+      AnswerTone.memory => (Icons.auto_awesome_outlined, HomeColors.lavender, ChatColors.cardHeader),
     };
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(16)),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(row.label, style: ChatText.button.copyWith(color: color)),
+    final route = row.route;
+    final radius = BorderRadius.circular(16);
+    return Material(
+      color: fill,
+      borderRadius: radius,
+      child: InkWell(
+        borderRadius: radius,
+        onTap: route == null ? null : () => context.push(route),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  row.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: ChatText.button.copyWith(color: color),
+                ),
+              ),
+              if (route != null) Icon(Icons.chevron_right_rounded, color: color, size: 20),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

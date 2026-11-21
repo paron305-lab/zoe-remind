@@ -7,10 +7,9 @@ import 'package:zoe_remind/ai/parser/intent_rules.dart';
 import 'package:zoe_remind/ai/parser/when_parser.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
-import 'package:zoe_remind/database/models/note.dart';
 import 'package:zoe_remind/database/models/reminder_occurrence.dart';
-import 'package:zoe_remind/database/repositories/note_repository.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
+import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
@@ -24,6 +23,10 @@ import 'package:zoe_remind/features/companion/models/mood_week.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/memory/memory_rules.dart';
+import 'package:zoe_remind/rag/history_query.dart';
+import 'package:zoe_remind/rag/rag_models.dart';
+import 'package:zoe_remind/rag/retriever.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
@@ -44,6 +47,14 @@ import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.da
 ///      kahapon?") → binabasa ang HISTORY tables (reminder_occurrences,
 ///      task_history, completion_history), hindi ang kasalukuyang estado.
 ///      Dito rin babasa ang RAG / Memory Engine.
+///      Saklaw (B4): "last week", "this month", "noong Lunes", "huling 3 araw"
+///      → HistoryQuery.
+///   9. RAG (Phase B): "ano wifi password ko?" → Retriever (FTS4 sa notes +
+///      memories). Ang sagot ay ang note / memory MISMO + ang mga source
+///      ("📝 Galing sa notes mo" + hanggang 3 note). Walang iniimbento si Zoe.
+///  10. Memories (B5): "tandaan mo na mas gusto ko ng morning reminders" →
+///      memory card (Accept muna). OFF ang long-term memory → note card na lang.
+///      Data ("tandaan mo, wifi password ay…") → note pa rin (MemoryRules).
 ///
 /// Nararamdaman (2c):
 ///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
@@ -70,7 +81,8 @@ class ChatPreviewBrain {
   ChatPreviewBrain({
     ReminderRepository? reminders,
     TaskRepository? tasks,
-    NoteRepository? notes,
+    Retriever? retriever,
+    Future<bool> Function()? memoryOn,
     IntentClassifier? classifier,
     MoodState Function()? mood,
     void Function(ZoeEvent event)? onMoodEvent,
@@ -80,7 +92,8 @@ class ChatPreviewBrain {
     Future<Map<int, DateTime>> Function()? activeAlarms,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
-        _notes = notes ?? NoteRepository(),
+        _retriever = retriever ?? Retriever(),
+        _memoryOn = memoryOn ?? SettingsRepository().isLongTermMemoryOn,
         _classifier = classifier ?? IntentClassifier(),
         _moodOf = mood ?? (() => MoodNow.current),
         _report = onMoodEvent ?? MoodController.instance.add,
@@ -94,7 +107,12 @@ class ChatPreviewBrain {
 
   final ReminderRepository _reminders;
   final TaskRepository _tasks;
-  final NoteRepository _notes;
+
+  /// RAG: hinahanap ang sagot sa notes + memories.
+  final Retriever _retriever;
+
+  /// ON ba ang long-term memory? OFF → hindi binabasa / sine-save ang memories.
+  final Future<bool> Function() _memoryOn;
   final IntentClassifier _classifier;
 
   /// Mood ni Zoe ngayon (para sa salita). Sa test: pwedeng ipasa.
@@ -193,6 +211,16 @@ class ChatPreviewBrain {
       return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
     }
 
+    // "tandaan mo na mas gusto ko ng morning reminders" → memory card (B5).
+    // Bago ang intent: ang "reminders" dito ay tatama sa reminder rule.
+    // (May oras / "bukas" → hindi memory — tingnan ang MemoryRules.)
+    // "do you remember that I like…?" = tanong (searchNotes) → hindi ise-save.
+    if (intent != ZoeIntent.searchNotes && MemoryRules.isRememberAboutMe(lower)) {
+      final card = await _memory(text);
+      if (!tone.isDown) return card;
+      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...card];
+    }
+
     // "pagod na ako", "hi zoe, stressed ako" → script para sa nararamdaman.
     // (Kapag may utos — reminder, task, listahan — ang utos pa rin ang sinusunod.)
     final feeling = ZoeLines.situationForTone(tone);
@@ -229,7 +257,6 @@ class ChatPreviewBrain {
 
   /// Sagot ayon sa intent (code muna; si Qwen kapag hindi alam ng code).
   Future<List<ChatEntry>> _answer(ZoeIntent codeIntent, String text, String lower) async {
-    bool has(List<String> words) => words.any(lower.contains);
     var intent = codeIntent;
     if (intent == ZoeIntent.unknown) {
       // Hindi nabasa ng ToneDetector pero mukhang nagkukuwento ("nahihirapan ako")
@@ -257,13 +284,22 @@ class ChatPreviewBrain {
       case ZoeIntent.createTask:
         return [_task(text, lower)];
       case ZoeIntent.getDone:
-        final day = has(['kahapon', 'yesterday'])
-            ? _daysAgo(1)
-            : WhenParser.pastDay(lower, now: _now());
-        return [await _doneOn(day ?? _daysAgo(1))];
+        // "kahapon", "last week", "this month", "noong Lunes"… (default: kahapon)
+        final doneRange =
+            HistoryQuery.range(lower, now: _now()) ?? HistoryRange.day(_daysAgo(1));
+        return [await _doneIn(doneRange)];
       case ZoeIntent.getMissed:
-        return [await _missed()];
+        // default: huling 7 araw (kasama ngayon)
+        final missedRange = HistoryQuery.range(lower, now: _now()) ??
+            HistoryQuery.lastDays(missedDays, now: _now());
+        return [await _missedIn(missedRange)];
       case ZoeIntent.getToday:
+        // "ano mga tasks ko kahapon?" / "last week" → history (natapos + na-miss).
+        // strict: ang "sa lunes" ay susunod na Lunes pa rin (schedule).
+        final past = HistoryQuery.range(lower, now: _now(), strict: true);
+        if (past != null && past.to.isBefore(_today0)) {
+          return [await _doneIn(past, withMissed: true)];
+        }
         // "busy ba ako bukas?" → bukas ang titingnan, hindi today.
         return [await _scheduleOn(_day(lower) ?? _today0)];
       case ZoeIntent.greeting:
@@ -337,6 +373,19 @@ class ChatPreviewBrain {
     return ConfirmEntry.task(draft);
   }
 
+  /// Memory card. OFF ang long-term memory → paliwanag + note card na lang.
+  Future<List<ChatEntry>> _memory(String text) async {
+    final content = MemoryRules.extract(text);
+    if (content.isEmpty) return [_note(text)];
+    if (!await _memoryOnSafe()) {
+      return [
+        TextEntry(fromZoe: true, text: _say(ZoeSituation.memoryOff)),
+        ConfirmEntry.note(NoteDraft(content: content)),
+      ];
+    }
+    return [ConfirmEntry.memory(MemoryDraft(content: content))];
+  }
+
   ChatEntry _note(String text) {
     // "i-note mo: abc" → kunin ang nasa likod ng ":" kung meron.
     // Hindi kasama ang ":" ng oras ("5:30").
@@ -374,60 +423,52 @@ class ChatPreviewBrain {
   // ───────────────────────── Reads (answer cards) ─────────────────────────
   // Deterministic code ang nagbabasa ng SQLite — ganito rin sa Memory Engine.
 
-  /// Mga salitang hindi nakakatulong sa paghahanap ("ano", "ko", "the"…).
-  static const _stopWords = {
-    'ano', 'anong', "ano'ng", 'ang', 'ng', 'mga', 'ko', 'mo', 'ako', 'akin', 'yung', "'yung",
-    'ba', 'sa', 'ay', 'na', 'nga', 'ulit', 'po', 'saan', 'nasaan', 'kailan', 'sino', 'zoe',
-    'what', "what's", 'whats', 'is', 'are', 'was', 'the', 'my', 'a', 'an', 'of', 'where',
-    'when', 'who', 'do', 'did', 'you', 'i', 'me', 'about', 'note', 'notes', 'remember',
-    'nilagay', 'sinabi', 'told', 'again', 'please', 'paki',
-    'naaalala', 'naalala', 'natatandaan', 'tanda', 'pa', 'still',
-  };
-
-  /// "ano locker code ko?" → hanapin ang "locker" at "code" sa Notes.
-  /// Ang note mismo ang ipinapakita — walang iniimbento si Zoe.
+  /// "ano locker code ko?" → Retriever (notes + memories, FTS4).
+  /// Ang note / memory mismo ang ipinapakita — walang iniimbento si Zoe.
+  /// Rows = mga source (hanggang 3), napipindot para buksan.
   Future<ChatEntry> _searchNotes(String lower) async {
-    final words = lower
-        .replaceAll(RegExp(r"[^a-z0-9ñ'\s-]"), ' ')
-        .split(RegExp(r'\s+'))
-        .where((w) => w.length >= 2 && !_stopWords.contains(w))
-        .take(6)
-        .toList();
-
-    // Bilangin kung ilang salita ang tumama sa bawat note.
-    final hits = <int, int>{};
-    final found = <int, Note>{};
-    for (final word in words) {
-      for (final note in await _notes.search(word, limit: 20)) {
-        final id = note.id;
-        if (id == null) continue;
-        found[id] = note;
-        hits[id] = (hits[id] ?? 0) + 1;
-      }
+    final useMemories = await _memoryOnSafe();
+    List<RetrievalHit> hits;
+    try {
+      hits = await _retriever.search(lower, includeMemories: useMemories, limit: 3);
+    } catch (_) {
+      hits = const [];
     }
 
-    if (found.isEmpty) {
+    if (hits.isEmpty) {
       return AnswerEntry(
         assumption: _t('Searched your notes', 'Hinanap sa notes mo'),
         text: _say(ZoeSituation.noteNotFound),
       );
     }
 
-    // Pinakamaraming tumamang salita ang una.
-    final ranked = found.values.toList()
-      ..sort((a, b) => hits[b.id]!.compareTo(hits[a.id]!));
-    final best = ranked.first;
-    final content = best.content.trim().isEmpty ? best.title : best.content.trim();
-    final shown = content.length > 300 ? '${content.substring(0, 300)}…' : content;
-
+    final best = hits.first.doc;
+    final shown = best.text.length > 300 ? '${best.text.substring(0, 300)}…' : best.text;
     return AnswerEntry(
-      assumption: _t('From your notes', 'Galing sa notes mo'),
-      text: _say(ZoeSituation.noteFound, {'note': shown}),
-      rows: [
-        for (final other in ranked.skip(1).take(2))
-          AnswerRow(AnswerTone.event, other.title),
-      ],
+      assumption: best.isMemory
+          ? _t('From what you told me', 'Galing sa sinabi mo sa akin')
+          : _t('From your notes', 'Galing sa notes mo'),
+      text: best.isMemory
+          ? _say(ZoeSituation.memoryFound, {'memory': shown})
+          : _say(ZoeSituation.noteFound, {'note': shown}),
+      rows: [for (final h in hits) _sourceRow(h.doc)],
     );
+  }
+
+  /// "📝 Wifi · Nov 18" → bubukas ang note. "💜 Mas gusto ko… · Nov 2" → Memories.
+  AnswerRow _sourceRow(RetrievalDoc d) => AnswerRow(
+        d.isMemory ? AnswerTone.memory : AnswerTone.note,
+        '${d.title} · ${ZoeDate.short(d.updatedAt)}',
+        route: d.isMemory ? '/settings/memories' : '/notes/edit/${d.id}',
+      );
+
+  /// Long-term memory ON? Kapag pumalya ang database → OFF (ligtas).
+  Future<bool> _memoryOnSafe() async {
+    try {
+      return await _memoryOn();
+    } catch (_) {
+      return false;
+    }
   }
 
   /// "89+9", "what is 12 x 3?", "100 / 8" → "100 ÷ 8 = 12.5". null = hindi math.
@@ -508,44 +549,75 @@ class ChatPreviewBrain {
     );
   }
 
-  /// "ano ginawa ko kahapon?" — galing sa HISTORY:
+  /// "ano ginawa ko kahapon / last week / this month?" — galing sa HISTORY:
   ///   tasks     → completion_history (kasama ang na-delete na task)
-  ///   reminders → reminder_occurrences na 'done' sa araw na iyon
+  ///   reminders → reminder_occurrences na 'done' sa saklaw
   ///               (kaya kasama pa rin ang daily reminder kahit na-done ulit ngayon)
-  Future<ChatEntry> _doneOn(DateTime day) async {
-    final tasks = await _tasks.getCompleted(from: day, to: day);
+  /// [withMissed] = "ano mga tasks ko kahapon?" → may rows din ng na-miss.
+  Future<ChatEntry> _doneIn(HistoryRange range, {bool withMissed = false}) async {
+    final tasks = await _tasks.getCompleted(from: range.from, to: range.to);
     final reminders = await _reminders.getOccurrences(
-      from: day,
-      to: day,
+      from: range.from,
+      to: range.to,
       status: OccurrenceStatus.done,
     );
-    final names = _unique([...tasks.map((t) => t.title), ...reminders.map((o) => o.title)]);
+    final items = <(String, String)>[
+      for (final t in tasks) (ZoeDate.key(t.completedAt), t.title),
+      for (final o in reminders) (o.day, o.title),
+    ];
+    final names = _unique(_newestFirst(items));
+
+    var missedTasks = 0;
+    var missedReminders = 0;
+    if (withMissed) {
+      missedTasks = (await _tasks.getMissed(
+              from: ZoeDate.key(range.from), to: ZoeDate.key(range.to)))
+          .length;
+      missedReminders = (await _reminders.getOccurrences(
+              from: range.from, to: range.to, status: OccurrenceStatus.missed))
+          .length;
+    }
+
+    final String text;
+    if (range.isSingleDay) {
+      text = names.isEmpty
+          ? _say(ZoeSituation.doneNone)
+          : _say(ZoeSituation.doneList, {'items': _listOf(names)});
+    } else {
+      final span = _span(range);
+      text = names.isEmpty
+          ? _say(ZoeSituation.doneRangeNone, {'range': span})
+          : _say(ZoeSituation.doneRangeList, {'range': span, 'items': _listOf(names)});
+    }
 
     return AnswerEntry(
-      assumption: 'Assuming ${ZoeDate.pretty(day)}',
-      text: names.isEmpty
-          ? _say(ZoeSituation.doneNone)
-          : _say(ZoeSituation.doneList, {'items': names.take(4).join(', ')}),
+      assumption: _rangeChip(range),
+      text: text,
       rows: [
         if (tasks.isNotEmpty)
           AnswerRow(AnswerTone.done, '${tasks.length} ${_plural(tasks.length, 'task')} completed'),
         if (reminders.isNotEmpty)
           AnswerRow(AnswerTone.reminder,
               '${reminders.length} ${_plural(reminders.length, 'reminder')} done'),
+        if (missedTasks > 0)
+          AnswerRow(AnswerTone.missed, '$missedTasks missed ${_plural(missedTasks, 'task')}'),
+        if (missedReminders > 0)
+          AnswerRow(AnswerTone.missed,
+              '$missedReminders missed ${_plural(missedReminders, 'reminder')}'),
       ],
     );
   }
 
-  /// "ano na-miss ko?" — huling [missedDays] araw (kasama ngayon), tasks + reminders.
-  /// Galing sa HISTORY:
+  /// "ano na-miss ko (last week)?" — tasks + reminders sa saklaw.
+  /// Default: huling [missedDays] araw (kasama ngayon). Galing sa HISTORY:
   ///   tasks     → task_history na 'missed'
   ///   reminders → reminder_occurrences na 'missed' (mga lumipas na araw)
-  ///               + ngayong araw: lumipas na ang oras, walang Done / Dismiss /
-  ///               Snooze (parehong patakaran ng Home)
-  Future<ChatEntry> _missed() async {
+  ///               + ngayong araw (kung kasama sa saklaw): lumipas na ang oras,
+  ///               walang Done / Dismiss / Snooze (parehong patakaran ng Home)
+  Future<ChatEntry> _missedIn(HistoryRange range) async {
     final now = _now();
     final today = _today0;
-    final from = _daysAgo(missedDays - 1);
+    final yesterday = _daysAgo(1);
 
     var active = const <int, DateTime>{};
     try {
@@ -563,43 +635,48 @@ class ChatPreviewBrain {
     // (araw, title) — para maayos mula pinakabago.
     final items = <(String, String)>[];
 
-    final tasks = await _tasks.getMissed(from: ZoeDate.key(from), to: ZoeDate.key(today));
+    final tasks =
+        await _tasks.getMissed(from: ZoeDate.key(range.from), to: ZoeDate.key(range.to));
     for (final row in tasks) {
       items.add((row['day'] as String, row['title'] as String));
     }
 
-    final past = await _reminders.getOccurrences(
-      from: from,
-      to: _daysAgo(1),
-      status: OccurrenceStatus.missed,
-    );
-    var reminderCount = past.length;
-    for (final o in past) {
-      items.add((o.day, o.title));
+    var reminderCount = 0;
+    final pastTo = range.to.isBefore(yesterday) ? range.to : yesterday;
+    if (!pastTo.isBefore(range.from)) {
+      final past = await _reminders.getOccurrences(
+        from: range.from,
+        to: pastTo,
+        status: OccurrenceStatus.missed,
+      );
+      reminderCount += past.length;
+      for (final o in past) {
+        items.add((o.day, o.title));
+      }
     }
 
-    for (final r in await _reminders.getForDay(today)) {
-      final at = ReminderStatusRules.occurrenceTime(r, today);
-      final pendingAt = active[r.id];
-      final alarmPending = pendingAt != null && _sameMinute(pendingAt, at);
-      final status =
-          ReminderStatusRules.statusOn(r, today, now: now, alarmPending: alarmPending);
-      if (status == ReminderStatus.missed) {
-        reminderCount++;
-        items.add((ZoeDate.key(today), r.title));
+    if (!range.to.isBefore(today) && !range.from.isAfter(today)) {
+      for (final r in await _reminders.getForDay(today)) {
+        final at = ReminderStatusRules.occurrenceTime(r, today);
+        final pendingAt = active[r.id];
+        final alarmPending = pendingAt != null && _sameMinute(pendingAt, at);
+        final status =
+            ReminderStatusRules.statusOn(r, today, now: now, alarmPending: alarmPending);
+        if (status == ReminderStatus.missed) {
+          reminderCount++;
+          items.add((ZoeDate.key(today), r.title));
+        }
       }
     }
 
     // Pinakabago muna. Isang beses lang bawat title sa text.
-    items.sort((a, b) => b.$1.compareTo(a.$1));
-    final names = _unique(items.map((e) => e.$2));
-    final range = '${ZoeDate.short(from)}–${ZoeDate.short(today)}';
+    final names = _unique(_newestFirst(items));
 
     return AnswerEntry(
-      assumption: _t('Last $missedDays days ($range)', 'Huling $missedDays araw ($range)'),
+      assumption: _rangeChip(range),
       text: names.isEmpty
           ? _say(ZoeSituation.missedNone)
-          : _say(ZoeSituation.missedList, {'items': names.take(4).join(', ')}),
+          : _say(ZoeSituation.missedList, {'items': _listOf(names)}),
       rows: [
         if (tasks.isNotEmpty)
           AnswerRow(AnswerTone.missed, '${tasks.length} missed ${_plural(tasks.length, 'task')}'),
@@ -608,6 +685,34 @@ class ChatPreviewBrain {
               '$reminderCount missed ${_plural(reminderCount, 'reminder')}'),
       ],
     );
+  }
+
+  /// Isang araw → "Assuming Nov 17, 2026".
+  /// Ilang araw → "Huling 7 araw (Nov 12–Nov 18)" / "Last week (Nov 9–Nov 15)".
+  String _rangeChip(HistoryRange r) {
+    if (r.isSingleDay) return 'Assuming ${ZoeDate.pretty(r.from)}';
+    return '${_t(r.en, r.tl)} (${_span(r)})';
+  }
+
+  /// "Nov 9–Nov 15"
+  static String _span(HistoryRange r) => '${ZoeDate.short(r.from)}–${ZoeDate.short(r.to)}';
+
+  /// Hanggang 4 na pangalan; ang iba ay "at 3 pa" / "and 3 more".
+  String _listOf(List<String> names) {
+    final shown = names.take(4).join(', ');
+    final more = names.length - 4;
+    if (more <= 0) return shown;
+    return '$shown${_t(' and $more more', ' at $more pa')}';
+  }
+
+  /// Pinakabagong araw muna; pareho ang araw → pareho ang dating ayos.
+  static List<String> _newestFirst(List<(String, String)> items) {
+    final indexed = [for (var i = 0; i < items.length; i++) (i, items[i])];
+    indexed.sort((a, b) {
+      final byDay = b.$2.$1.compareTo(a.$2.$1);
+      return byDay != 0 ? byDay : a.$1.compareTo(b.$1);
+    });
+    return [for (final e in indexed) e.$2.$2];
   }
 
   // ───────────────────────── Helpers ─────────────────────────
@@ -704,5 +809,6 @@ String draftEmoji(String title, DraftKind kind) {
     DraftKind.reminder => '🔔',
     DraftKind.task => '✅',
     DraftKind.note => '📝',
+    DraftKind.memory => '💜',
   };
 }

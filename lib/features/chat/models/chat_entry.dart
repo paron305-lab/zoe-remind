@@ -29,7 +29,7 @@ class InfoEntry extends ChatEntry {
 /// Tatlong tuldok habang "nag-iisip" si Zoe.
 class TypingEntry extends ChatEntry {}
 
-enum DraftKind { reminder, task, note }
+enum DraftKind { reminder, task, note, memory }
 
 enum DraftStatus { pending, saving, saved, cancelled }
 
@@ -37,13 +37,15 @@ enum DraftStatus { pending, saving, saved, cancelled }
 /// Walang nase-save hangga't hindi pinipindot ng user ang Accept
 /// (o Save sa Edit screen).
 class ConfirmEntry extends ChatEntry {
-  ConfirmEntry.reminder(ReminderDraft this.reminder) : task = null, note = null;
-  ConfirmEntry.task(TaskDraft this.task) : reminder = null, note = null;
-  ConfirmEntry.note(NoteDraft this.note) : reminder = null, task = null;
+  ConfirmEntry.reminder(ReminderDraft this.reminder) : task = null, note = null, memory = null;
+  ConfirmEntry.task(TaskDraft this.task) : reminder = null, note = null, memory = null;
+  ConfirmEntry.note(NoteDraft this.note) : reminder = null, task = null, memory = null;
+  ConfirmEntry.memory(MemoryDraft this.memory) : reminder = null, task = null, note = null;
 
   ReminderDraft? reminder;
   TaskDraft? task;
   NoteDraft? note;
+  MemoryDraft? memory;
 
   DraftStatus status = DraftStatus.pending;
 
@@ -57,7 +59,9 @@ class ConfirmEntry extends ChatEntry {
       ? DraftKind.reminder
       : task != null
           ? DraftKind.task
-          : DraftKind.note;
+          : note != null
+              ? DraftKind.note
+              : DraftKind.memory;
 
   bool get isPending => status == DraftStatus.pending;
 }
@@ -96,16 +100,21 @@ class ClarifyEntry extends ChatEntry {
   bool get wantsText => chips.isEmpty;
 }
 
-enum AnswerTone { done, reminder, event, missed }
+/// note / memory = source row ng RAG ("📝 Wifi · Nov 18").
+enum AnswerTone { done, reminder, event, missed, note, memory }
 
 class AnswerRow {
-  const AnswerRow(this.tone, this.label);
+  const AnswerRow(this.tone, this.label, {this.route});
   final AnswerTone tone;
   final String label;
+
+  /// May route → napipindot (hal. '/notes/edit/3' para buksan ang note).
+  final String? route;
 }
 
-/// Sagot sa tanong tungkol sa sariling data (Memory Engine later).
+/// Sagot sa tanong tungkol sa sariling data (Memory Engine / RAG).
 /// "📅 Assuming Sept 3, 2026" chip + text + colored summary rows.
+/// Kapag galing sa notes / memories: ang rows ay ang mga SOURCE.
 class AnswerEntry extends ChatEntry {
   AnswerEntry({required this.assumption, required this.text, this.rows = const []});
   final String assumption;

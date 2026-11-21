@@ -15,4 +15,9 @@ class StorageConstants {
   static const memoriesTable = 'memories';
   static const moodTable = 'zoe_mood';
   static const moodLogTable = 'mood_log';
+
+  // RAG (v13): FTS4 na kopya ng notes at memories para sa paghahanap.
+  // docid = id sa notes / memories. Pinupuno ng triggers.
+  static const notesFtsTable = 'notes_fts';
+  static const memoriesFtsTable = 'memories_fts';
 }
