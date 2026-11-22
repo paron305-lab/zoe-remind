@@ -25,7 +25,7 @@ class _NoQwen extends IntentClassifier {
   Future<void> warmUp() async {}
 
   @override
-  Future<ZoeIntent?> classify(String text) async => null;
+  Future<ZoeLabel?> label(String text) async => null;
 }
 
 class _FakeTasks extends TaskRepository {

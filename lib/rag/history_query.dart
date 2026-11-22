@@ -39,6 +39,7 @@ class HistoryRange {
 ///
 ///   kahapon / yesterday                    → kahapon
 ///   kamakalawa / day before yesterday      → 2 araw na ang nakaraan
+///   nung isang araw / the other day / kamakailan → 3 araw bago ngayon – kahapon (B6)
 ///   ngayon / today / ngayong araw          → ngayon
 ///   last week / nakaraang linggo / noong isang linggo → Lunes–Linggo ng nakaraang linggo
 ///   this week / ngayong linggo / nitong linggo        → Lunes ngayong linggo – ngayon
@@ -100,6 +101,9 @@ class HistoryQuery {
       r'|\b(?:nakaraang|noong\s+isang|nung\s+isang|nakalipas\s+na)\s+taon\b');
   static final _thisYear = RegExp(r'\bthis\s+year\b|\b(?:ngayong|nitong)\s+taon\b');
   static final _dayBefore = RegExp(r'\bkamakalawa\b|\bday\s+before\s+yesterday\b');
+  // B6: "nung isang araw" = ilang araw na ang nakaraan (hindi ngayon).
+  static final _otherDay = RegExp(r'\b(?:nung|noong)\s+isang\s+araw\b|\bthe\s+other\s+day\b'
+      r'|\bkamakailan\b|\b(?:a\s+)?few\s+days\s+ago\b');
   static final _yesterday = RegExp(r'\b(?:kahapon|yesterday)\b');
   static final _today = RegExp(r'\b(?:today|ngayong\s+araw|ngayon)\b');
   static final _month = RegExp(
@@ -175,6 +179,10 @@ class HistoryQuery {
       return HistoryRange(_d(y - 1, 1, 1), _d(y - 1, 12, 31), en: 'Last year', tl: 'Nakaraang taon');
     }
     if (_dayBefore.hasMatch(lower)) return HistoryRange.day(_d(y, m, d - 2));
+    if (_otherDay.hasMatch(lower)) {
+      return HistoryRange(_d(y, m, d - 3), _d(y, m, d - 1),
+          en: 'The other day', tl: 'Nung isang araw');
+    }
     if (_yesterday.hasMatch(lower)) return HistoryRange.day(_d(y, m, d - 1));
 
     if (!strict) {

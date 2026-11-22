@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:zoe_remind/ai/inference/qwen_engine.dart';
+import 'package:zoe_remind/ai/parser/zoe_label.dart';
+
+export 'package:zoe_remind/ai/parser/zoe_label.dart';
 
 /// Ano ang gusto ng user. Ito LANG ang pwedeng piliin ni Qwen (allowlist).
 /// Ang date, time, at title ay kinukuha ng code — hindi ni Qwen.
@@ -25,6 +28,12 @@ enum ZoeIntent {
 /// Tinatanong si Qwen: "anong klaseng request ito?" — isang label lang ang sagot.
 /// Dito lang umaabot ang mga mensaheng HINDI nahulaan ng IntentRules (code).
 ///
+/// B6: may kasamang maliit na detalye ang label ([label] → [ZoeLabel]):
+///   search_notes | gamot, mama      (mga salitang hahanapin — galing sa mensahe)
+///   get_missed | last 3 days        (saklaw — isa sa ZoeLabel.ranges)
+/// Code pa rin ang naghahanap at sumasagot. Mabagal (~7s), kaya para lang sa
+/// mga tanong na hindi nahuli ng IntentRules.
+///
 /// Sandbox rules:
 ///  • Input Guard: pinuputol ang sobrang habang input.
 ///  • Allowlist: tinatanggap lang ang sagot kung isa sa mga label ng [ZoeIntent].
@@ -38,6 +47,9 @@ class IntentClassifier {
 
   static const maxInput = 300;
   static const timeout = Duration(seconds: 40);
+
+  /// Label + ilang salita ("search_notes | plate number"). Maikli pa rin.
+  static const maxTokens = 16;
 
   /// Huling resulta, bilis, at model (para sa debugging):
   /// "create_task · 2.4s · lite", "null (timeout) · 40.0s · plus", atbp.
@@ -66,15 +78,15 @@ class IntentClassifier {
   Future<String> _ask(String input) async {
     final messages = [
       const BrainMessage.system(_system),
-      for (final (user, intent) in _examples) ...[
+      for (final (user, answer) in _examples) ...[
         BrainMessage.user(user),
-        BrainMessage.assistant(intent.label),
+        BrainMessage.assistant(answer),
       ],
       BrainMessage.user(input),
     ];
     final out = StringBuffer();
     await for (final piece
-        in _engine.generate(messages, maxTokens: 8, json: true).timeout(timeout)) {
+        in _engine.generate(messages, maxTokens: maxTokens, json: true).timeout(timeout)) {
       out.write(piece);
     }
     return out.toString();
@@ -93,26 +105,35 @@ class IntentClassifier {
       'get_done = asks what they already finished\n'
       'get_missed = asks what they missed or forgot\n'
       'greeting = hello, thanks, small talk\n'
-      'unknown = anything else';
+      'unknown = anything else\n'
+      'For search_notes, add " | " and the key words copied from the message.\n'
+      'For get_done, get_missed or get_today, only if the message mentions a time, add " | " '
+      'and one of: today, yesterday, day before yesterday, the other day, last 3 days, '
+      'last 7 days, this week, last week, this month, last month.';
 
-  /// Maiikling halimbawa, isa kada label. Sadyang kaunti: bawat halimbawa ay
-  /// binabasa ni Qwen sa bawat tanong, kaya mas marami = mas mabagal.
+  /// Maiikling halimbawa (user → sagot ni Qwen). Sadyang kaunti: bawat
+  /// halimbawa ay binabasa ni Qwen sa bawat tanong, kaya mas marami = mas mabagal.
   /// Ang mga karaniwang pagkakasabi ay nahuhuli na ng IntentRules (code).
-  static const _examples = <(String, ZoeIntent)>[
-    ('pakiabisuhan ako 8am bukas, inom ng gamot', ZoeIntent.createReminder),
-    ('bibili pa ako ng gatas sa Sabado', ZoeIntent.createTask),
-    ('ang locker code ko ay 4521', ZoeIntent.createNote),
-    ('yung plate number na binigay ko dati?', ZoeIntent.searchNotes),
-    ('anong meron bukas?', ZoeIntent.getToday),
-    ('how much have I gotten through?', ZoeIntent.getDone),
-    ('may naiwan ba akong hindi nagawa?', ZoeIntent.getMissed),
-    ('nandito ka ba', ZoeIntent.greeting),
-    ('what is the capital of France?', ZoeIntent.unknown),
-    ('ang ganda ng panahon', ZoeIntent.unknown),
+  static const _examples = <(String, String)>[
+    ('pakiabisuhan ako 8am bukas, inom ng gamot', 'create_reminder'),
+    ('bibili pa ako ng gatas sa Sabado', 'create_task'),
+    ('ang locker code ko ay 4521', 'create_note'),
+    ('yung plate number na binigay ko dati?', 'search_notes | plate number'),
+    ('yung sinabi ko tungkol sa doktor ni lola', 'search_notes | doktor, lola'),
+    ('anong meron bukas?', 'get_today'),
+    ('how much have I gotten through this week?', 'get_done | this week'),
+    ('may naiwan ba akong hindi nagawa nung isang araw?', 'get_missed | the other day'),
+    ('nandito ka ba', 'greeting'),
+    ('what is the capital of France?', 'unknown'),
+    ('ang ganda ng panahon', 'unknown'),
   ];
 
+  /// Intent lang (para sa lumang tawag). Tingnan ang [label].
+  Future<ZoeIntent?> classify(String text) async => (await label(text))?.intent;
+
+  /// Intent + detalye (mga salita / saklaw) mula kay Qwen.
   /// Returns null kapag hindi makasagot si Qwen nang maayos.
-  Future<ZoeIntent?> classify(String text) async {
+  Future<ZoeLabel?> label(String text) async {
     var input = text.trim();
     if (input.isEmpty) return null;
     if (input.length > maxInput) input = input.substring(0, maxInput);
@@ -132,13 +153,15 @@ class IntentClassifier {
       final said = parse(raw);
       // Code ang may huling salita: "reminder" na walang oras / araw / utos → unknown.
       final intent = checkWithCode(said, input);
-      final label = said == null
+      // Detalye: salitang nasa mensahe lang, saklaw na nasa allowlist lang.
+      final result = intent == null ? null : ZoeLabel.from(intent, raw, input);
+      final shown = said == null
           ? 'null (hindi label: "${raw.trim()}")'
           : intent == said
-              ? said.label
+              ? '$result'
               : '${said.label} → ${intent?.label} (walang oras/araw/utos)';
-      lastResult = '$label · ${took()}';
-      return intent;
+      lastResult = '$shown · ${took()}';
+      return result;
     } on TimeoutException {
       _engine.stop();
       lastResult = 'null (timeout) · ${took()}';

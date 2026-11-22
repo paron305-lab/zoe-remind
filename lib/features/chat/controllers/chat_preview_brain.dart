@@ -25,10 +25,12 @@ import 'package:zoe_remind/features/companion/models/mood_week.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/memory/habit_rules.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
 import 'package:zoe_remind/rag/history_query.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
+import 'package:zoe_remind/rag/search_misses.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
@@ -37,6 +39,9 @@ import 'package:zoe_remind/rag/retriever.dart';
 ///                            sa MoodController (pagod → gentle si Zoe).
 ///   2. IntentRules (code) → agad ang sagot, gumagana kahit walang model.
 ///   3. Walang tumamang rule? → tinatanong si Qwen kung anong INTENT (label lang).
+///      B6: may kasamang detalye ang label — mga salitang hahanapin
+///      ("search_notes | gamot, mama") o saklaw ("get_missed | last 3 days").
+///      Code (ZoeLabel) ang nagsasala: salitang wala sa mensahe → tapon.
 ///   4. Date, time, title → laging code ang kumukuha (hindi si Qwen).
 ///   5. Lahat ng write    → confirmation card; walang nase-save hangga't
 ///                          hindi pinipindot ng user ang Accept.
@@ -259,6 +264,8 @@ class ChatPreviewBrain {
   /// Sagot ayon sa intent (code muna; si Qwen kapag hindi alam ng code).
   Future<List<ChatEntry>> _answer(ZoeIntent codeIntent, String text, String lower) async {
     var intent = codeIntent;
+    // B6: label ni Qwen (kapag siya ang tinanong) — mga salita / saklaw.
+    ZoeLabel? guess;
     if (intent == ZoeIntent.unknown) {
       // Hindi nabasa ng ToneDetector pero mukhang nagkukuwento ("nahihirapan ako")
       // → maikling malasakit, agad (hindi na kay Qwen).
@@ -267,7 +274,8 @@ class ChatPreviewBrain {
         _mood = MoodState.gentle;
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.comfort))];
       }
-      intent = await _classifier.classify(text) ?? ZoeIntent.unknown;
+      guess = await _classifier.label(text);
+      intent = guess?.intent ?? ZoeIntent.unknown;
       // Hula ni Qwen na gumawa (reminder / task / note) → tanong muna, hindi card.
       if (_isCreate(intent)) {
         return [askKind(text, memory: MemoryRules.hasTrigger(lower))];
@@ -283,25 +291,28 @@ class ChatPreviewBrain {
       case ZoeIntent.createNote:
         return [_note(text)];
       case ZoeIntent.searchNotes:
-        return [await _searchNotes(lower)];
+        return [await _searchNotes(lower, words: guess?.words ?? const [])];
       case ZoeIntent.createReminder:
         return [_reminder(text, lower)];
       case ZoeIntent.createTask:
         return [_task(text, lower)];
       case ZoeIntent.getDone:
         // "kahapon", "last week", "this month", "noong Lunes"… (default: kahapon)
-        final doneRange =
-            HistoryQuery.range(lower, now: _now()) ?? HistoryRange.day(_daysAgo(1));
+        final doneRange = HistoryQuery.range(lower, now: _now()) ??
+            _guessRange(guess) ??
+            HistoryRange.day(_daysAgo(1));
         return [await _doneIn(doneRange)];
       case ZoeIntent.getMissed:
         // default: huling 7 araw (kasama ngayon)
         final missedRange = HistoryQuery.range(lower, now: _now()) ??
+            _guessRange(guess) ??
             HistoryQuery.lastDays(missedDays, now: _now());
         return [await _missedIn(missedRange)];
       case ZoeIntent.getToday:
         // "ano mga tasks ko kahapon?" / "last week" → history (natapos + na-miss).
         // strict: ang "sa lunes" ay susunod na Lunes pa rin (schedule).
-        final past = HistoryQuery.range(lower, now: _now(), strict: true);
+        final past =
+            HistoryQuery.range(lower, now: _now(), strict: true) ?? _guessRange(guess);
         if (past != null && past.to.isBefore(_today0)) {
           return [await _doneIn(past, withMissed: true)];
         }
@@ -320,6 +331,13 @@ class ChatPreviewBrain {
           ),
         ];
     }
+  }
+
+  /// Saklaw mula sa label ni Qwen ("last 3 days") → petsa (code, HistoryQuery).
+  /// null kapag walang saklaw ang label.
+  HistoryRange? _guessRange(ZoeLabel? guess) {
+    final r = guess?.range;
+    return r == null ? null : HistoryQuery.range(r, now: _now());
   }
 
   // ───────────────────────── Tanong muna (uri) ─────────────────────────
@@ -353,6 +371,21 @@ class ChatPreviewBrain {
       DraftKind.note => [_note(text)],
       DraftKind.memory => await _memory(text),
     };
+  }
+
+  /// B6 implicit learning: "Napansin ko, 5 beses… tandaan ko ba?" + memory card.
+  /// Ang card ay MUNGKAHI (habit) — Accept muna bago ma-save.
+  List<ChatEntry> habitOffer(HabitSuggestion s, ZoeLanguage lang) {
+    _lang = lang;
+    _mood = _moodOf();
+    final situation = switch (s.habit) {
+      Habit.morning => ZoeSituation.habitMorning,
+      Habit.evening => ZoeSituation.habitEvening,
+    };
+    return [
+      TextEntry(fromZoe: true, text: _say(situation, {'count': '${s.count}'})),
+      ConfirmEntry.memory(MemoryDraft(content: s.memory(lang), habit: s.habit.name)),
+    ];
   }
 
   /// "✖ Wala" / "wag na" sa tanong → maikling sagot, walang card.
@@ -473,18 +506,30 @@ class ChatPreviewBrain {
   /// "ano locker code ko?" → Retriever (notes + memories, FTS4).
   /// Ang note / memory mismo ang ipinapakita — walang iniimbento si Zoe.
   /// Rows = mga source (hanggang 3), napipindot para buksan.
-  Future<ChatEntry> _searchNotes(String lower) async {
+  ///
+  /// [words] (B6) = mga salitang pinili ni Qwen MULA sa mensahe ("gamot, mama").
+  /// Iyon ang hahanapin; kapag wala, ang buong tanong ulit.
+  Future<ChatEntry> _searchNotes(String lower, {List<String> words = const []}) async {
     final useMemories = await _memoryOnSafe();
-    List<RetrievalHit> hits;
-    try {
-      hits = await _retriever.search(lower, includeMemories: useMemories, limit: 3);
-    } catch (_) {
-      hits = const [];
+    Future<List<RetrievalHit>> find(String q) async {
+      try {
+        return await _retriever.search(q, includeMemories: useMemories, limit: 3);
+      } catch (_) {
+        return const [];
+      }
     }
 
+    var hits = await find(words.isEmpty ? lower : words.join(' '));
+    if (hits.isEmpty && words.isNotEmpty) hits = await find(lower);
+
     if (hits.isEmpty) {
+      // B6: para makita sa Developer kung anong tanong ang pumapalya (RAM lang).
+      SearchMisses.record(lower);
       return AnswerEntry(
-        assumption: _t('Searched your notes', 'Hinanap sa notes mo'),
+        assumption: words.isEmpty
+            ? _t('Searched your notes', 'Hinanap sa notes mo')
+            : _t('Searched your notes for: ${words.join(', ')}',
+                'Hinanap sa notes mo: ${words.join(', ')}'),
         text: _say(ZoeSituation.noteNotFound),
       );
     }

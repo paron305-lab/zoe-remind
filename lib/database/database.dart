@@ -31,6 +31,8 @@ class ZoeDatabase {
   /// v13: notes_fts + memories_fts (FTS4) + triggers — para sa RAG.
   ///      Ginagawa sa onOpen ([_ensureSearchIndex]), hindi sa batch, para
   ///      kahit walang FTS4 ang isang phone ay bumubukas pa rin ang app.
+  ///      B6: "unicode61" tokenizer kapag kaya ng phone (Niño = nino);
+  ///      kusang inililipat ang lumang "simple" index — walang version bump.
   static const _version = 13;
 
   Future<Database>? _opening;
@@ -41,6 +43,9 @@ class ZoeDatabase {
 
   /// Huling error sa paggawa ng search index (para sa Developer screen).
   String? searchError;
+
+  /// Tokenizer ng search index: 'unicode61' (ñ = n) o 'simple'. null = wala.
+  String? searchTokenizer;
 
   /// Opens the database once and reuses it.
   Future<Database> get database => _opening ??= _open();
@@ -84,31 +89,75 @@ class ZoeDatabase {
   /// hindi tugma ang bilang ng rows (hal. unang bukas pagkatapos ng update).
   ///
   /// FTS4 (hindi FTS5): kasama ito sa built-in SQLite ng Android.
-  /// Default na "simple" tokenizer: maliit na titik (A–Z), hati sa bantas.
+  /// Tokenizer (B6): "unicode61" + remove_diacritics kapag kaya ng phone
+  /// ("Niño" = "nino", "CAFÉ" = "cafe"); kung hindi, ang default na "simple".
+  /// Kapag iba ang tokenizer ng lumang index (hal. "simple" mula B1), binubura
+  /// ito at ginagawa ulit mula sa notes / memories — walang nawawalang data.
   ///
   /// Hindi nagt-throw: kapag pumalya (walang FTS4), false lang → LIKE search.
   static Future<bool> _ensureSearchIndex(Database db) async {
     try {
+      final tokenizer = await _pickTokenizer(db);
       for (final spec in _searchSpecs) {
-        final existed = await _tableExists(db, spec.fts);
-        if (!existed) {
-          await db.execute(
-              'CREATE VIRTUAL TABLE IF NOT EXISTS ${spec.fts} USING fts4(${spec.columns.join(', ')})');
+        final sql = await _tableSql(db, spec.fts);
+        var fresh = sql == null;
+        if (sql != null && tokenizerOf(sql) != tokenizer) {
+          // Lumang tokenizer → gawin ulit (triggers muna, saka ang table).
+          for (final drop in spec.dropTriggerSql) {
+            await db.execute(drop);
+          }
+          await db.execute('DROP TABLE IF EXISTS ${spec.fts}');
+          fresh = true;
         }
-        for (final sql in spec.triggerSql) {
-          await db.execute(sql);
+        if (fresh) await db.execute(spec.createSql(tokenizer));
+        for (final trigger in spec.triggerSql) {
+          await db.execute(trigger);
         }
-        if (!existed || await _count(db, spec.table) != await _count(db, spec.fts)) {
+        if (fresh || await _count(db, spec.table) != await _count(db, spec.fts)) {
           await _rebuild(db, spec);
         }
       }
       instance.searchError = null;
+      instance.searchTokenizer = tokenizer;
       return true;
     } catch (e) {
       debugPrint('Search index (FTS4) not available: $e');
       instance.searchError = '$e';
+      instance.searchTokenizer = null;
       return false;
     }
+  }
+
+  /// Ang tokenizer clause para sa unicode61 (walang tuldik).
+  static const unicodeTokenizerSql = 'tokenize=unicode61 "remove_diacritics=1"';
+
+  /// Kaya ba ng SQLite ng phone ang unicode61? Sinusubukan sa temp table.
+  /// 'unicode61' o 'simple'.
+  static Future<String> _pickTokenizer(Database db) async {
+    const probe = 'temp.zoe_tokenizer_probe';
+    try {
+      await db.execute('CREATE VIRTUAL TABLE IF NOT EXISTS $probe USING fts4(x, $unicodeTokenizerSql)');
+      await db.execute('DROP TABLE IF EXISTS $probe');
+      return 'unicode61';
+    } catch (e) {
+      debugPrint('unicode61 tokenizer not available, using simple: $e');
+      try {
+        await db.execute('DROP TABLE IF EXISTS $probe');
+      } catch (_) {}
+      return 'simple';
+    }
+  }
+
+  /// 'unicode61' o 'simple', mula sa CREATE VIRTUAL TABLE na SQL.
+  static String tokenizerOf(String createSql) =>
+      createSql.toLowerCase().contains('unicode61') ? 'unicode61' : 'simple';
+
+  /// Ang CREATE SQL ng table (mula sa sqlite_master), o null kung wala.
+  static Future<String?> _tableSql(Database db, String name) async {
+    final rows = await db.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1", [name]);
+    if (rows.isEmpty) return null;
+    return (rows.first['sql'] as String?) ?? '';
   }
 
   /// Burahin at punuin ulit ang FTS table mula sa totoong table.
@@ -148,6 +197,7 @@ class ZoeDatabase {
       sqliteVersion: '${version.first['v']}',
       counts: counts,
       error: searchError,
+      tokenizer: searchTokenizer,
     );
   }
 
@@ -550,6 +600,20 @@ class _FtsSpec {
   final String fts;
   final List<String> columns;
 
+  /// CREATE VIRTUAL TABLE na may [tokenizer] ('unicode61' o 'simple').
+  String createSql(String tokenizer) {
+    final cols = columns.join(', ');
+    final tok = tokenizer == 'unicode61' ? ', ${ZoeDatabase.unicodeTokenizerSql}' : '';
+    return 'CREATE VIRTUAL TABLE IF NOT EXISTS $fts USING fts4($cols$tok)';
+  }
+
+  /// Para sa paggawa ulit ng index (ibang tokenizer).
+  List<String> get dropTriggerSql => [
+        'DROP TRIGGER IF EXISTS ${fts}_ai',
+        'DROP TRIGGER IF EXISTS ${fts}_au',
+        'DROP TRIGGER IF EXISTS ${fts}_ad',
+      ];
+
   /// Insert / update / delete sa [table] → sabay sa [fts].
   /// Update: binubura at ini-insert ulit (gumagana kahit nawawala ang row sa
   /// index). "UPDATE OF" — ang pin / importance lang ay hindi gumagalaw sa index.
@@ -575,6 +639,7 @@ class SearchIndexStatus {
     required this.sqliteVersion,
     required this.counts,
     this.error,
+    this.tokenizer,
   });
 
   /// true = FTS4 ang ginagamit; false = LIKE.
@@ -584,6 +649,9 @@ class SearchIndexStatus {
   /// table → (bilang ng rows, bilang sa index o null kung walang index).
   final Map<String, (int, int?)> counts;
   final String? error;
+
+  /// 'unicode61' (ñ = n) o 'simple'. null = walang FTS4.
+  final String? tokenizer;
 
   /// Tugma lahat ng bilang.
   bool get inSync => counts.values.every((c) => c.$2 == c.$1);

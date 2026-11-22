@@ -35,6 +35,11 @@ void main() {
     final cases = {
       'ano na-miss ko last week?': '2026-11-09..2026-11-15',
       'ano na-miss ko noong isang linggo?': '2026-11-09..2026-11-15',
+      // B6: "nung isang araw" = 3 araw bago ngayon hanggang kahapon
+      'nakaligtaan ko ba yung bayarin nung isang araw?': '2026-11-18..2026-11-20',
+      'ano natapos ko noong isang araw': '2026-11-18..2026-11-20',
+      'what did i miss the other day': '2026-11-18..2026-11-20',
+      'may na-miss ba ako kamakailan?': '2026-11-18..2026-11-20',
       'ano natapos ko nakaraang linggo': '2026-11-09..2026-11-15',
       'ano natapos ko this week?': '2026-11-16..2026-11-21',
       'ano na-miss ko ngayong linggo': '2026-11-16..2026-11-21',
@@ -94,5 +99,9 @@ void main() {
     final d = HistoryQuery.lastDays(7, now: now);
     expect((d.en, d.tl), ('Last 7 days', 'Huling 7 araw'));
     expect(d.days, 7);
+  });
+
+  test('B6: "nung isang araw" ay malinaw na nakaraan (strict OK)', () {
+    expect(span('ano mga tasks ko nung isang araw?', strict: true), '2026-11-18..2026-11-20');
   });
 }

@@ -21,6 +21,8 @@ import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/memory/habit_rules.dart';
+import 'package:zoe_remind/memory/habit_watcher.dart';
 
 /// Estado ng header: Ready / Thinking… / No brain yet / Downloading.
 enum ZoeChatStatus { ready, thinking, preview, noBrain, downloading }
@@ -30,11 +32,16 @@ enum ZoeChatStatus { ready, thinking, preview, noBrain, downloading }
 /// Golden rule: si Zoe (AI) ay nagmumungkahi lang. Ang code na ito ang
 /// nagva-validate at nagse-save — at laging pagkatapos ng Accept ng user.
 class ZoeChatController extends ChangeNotifier {
-  ZoeChatController({ChatPreviewBrain? brain}) : _brain = brain ?? ChatPreviewBrain();
+  ZoeChatController({ChatPreviewBrain? brain, HabitWatcher? habits})
+      : _brain = brain ?? ChatPreviewBrain(),
+        _habits = habits ?? HabitWatcher();
 
   static const maxInput = 500; // Input Guard (length limit)
 
   final ChatPreviewBrain _brain;
+
+  /// B6 implicit learning: napapansin ang ugali (hal. morning reminders).
+  final HabitWatcher _habits;
   final _settings = SettingsRepository();
   final _history = ChatHistoryRepository();
   final _reminders = ReminderRepository();
@@ -360,6 +367,13 @@ class ZoeChatController extends ChangeNotifier {
   void cancel(ConfirmEntry e) {
     if (!e.isPending) return;
     e.status = DraftStatus.cancelled;
+    // B6: "Huwag" sa mungkahi ni Zoe → hindi na niya ito itatanong ulit.
+    final habit = e.memory?.habit;
+    if (habit != null) {
+      for (final h in Habit.values) {
+        if (h.name == habit) unawaited(_declineHabit(h));
+      }
+    }
     entries.add(TextEntry(
       fromZoe: true,
       text: t("Okay, I won't save it.", 'Sige, hindi ko na ise-save. 👍'),
@@ -416,8 +430,12 @@ class ZoeChatController extends ChangeNotifier {
             source: NoteSource.zoe,
           );
         case DraftKind.memory:
-          // 'user' = sinabi mo mismo. null = OFF ang long-term memory.
-          final id = await _memories.add(e.memory!.content, source: 'user');
+          // 'user' = sinabi mo mismo. 'chat' = mungkahi ni Zoe na in-Accept mo (B6).
+          // null = OFF ang long-term memory.
+          final id = await _memories.add(
+            e.memory!.content,
+            source: e.memory!.isSuggestion ? 'chat' : 'user',
+          );
           if (id == null) {
             e.status = DraftStatus.pending;
             entries.add(TextEntry(
@@ -433,6 +451,8 @@ class ZoeChatController extends ChangeNotifier {
       e.status = DraftStatus.saved;
       _notify();
       await _save('zoe', _savedLine(e));
+      // B6: bagong reminder → may napansing ugali ba? (mungkahi lang, may card)
+      if (e.kind == DraftKind.reminder) unawaited(_offerHabit());
       return true;
     } catch (err) {
       debugPrint('Zoe chat: saving card failed: $err');
@@ -444,6 +464,29 @@ class ZoeChatController extends ChangeNotifier {
       ));
       _notify();
       return false;
+    }
+  }
+
+  // ───────────────────────── Implicit learning (B6) ─────────────────────────
+
+  /// Pagkatapos mag-save ng reminder: "Napansin ko… tandaan ko ba?" + card.
+  /// Walang lalabas kapag OFF ang long-term memory, may memory na tungkol
+  /// diyan, tinanggihan na, o naitanong na kamakailan (HabitWatcher).
+  Future<void> _offerHabit() async {
+    try {
+      final suggestion = await _habits.next();
+      if (suggestion == null || _disposed) return;
+      await _zoeSays(_brain.habitOffer(suggestion, language));
+    } catch (err) {
+      debugPrint('Zoe chat: habit check failed: $err');
+    }
+  }
+
+  Future<void> _declineHabit(Habit habit) async {
+    try {
+      await _habits.decline(habit);
+    } catch (err) {
+      debugPrint('Zoe chat: saving habit decline failed: $err');
     }
   }
 

@@ -47,7 +47,14 @@ class SearchRepository {
       (await _likeNotes(db, t)).forEach(keep);
       if (includeMemories) (await _likeMemories(db, t)).forEach(keep);
     }
-    return found.values.toList();
+    // LIKE ay substring ("pass" sa "passport") → salain gamit ang parehong
+    // patakaran ng FTS (prefix 4+ letra, "=" eksakto), para pareho ang lumalabas.
+    return found.values
+        .where((d) {
+          final words = QueryTerms.tokens('${d.title} ${d.text}');
+          return terms.any((t) => QueryTerms.groupIn(t, words));
+        })
+        .toList();
   }
 
   // ───────────────────────── FTS4 ─────────────────────────
@@ -73,12 +80,12 @@ class SearchRepository {
   }
 
   // ───────────────────────── LIKE (fallback) ─────────────────────────
-  // Substring ito ("pin" sa "shopping"), pero sinasala ulit ng Retriever
-  // gamit ang parehong patakaran ng FTS, kaya hindi lalabas ang mali.
+  // Substring ito ("pin" sa "shopping"), kaya sinasala sa [candidates]
+  // gamit ang parehong patakaran ng FTS, at hindi lalabas ang mali.
 
   Future<List<RetrievalDoc>> _likeNotes(Database db, TermGroup t) async {
-    final where = t.alts.map((_) => '(title LIKE ? OR content LIKE ?)').join(' OR ');
-    final args = [for (final a in t.alts) ...['%$a%', '%$a%']];
+    final where = t.plainAlts.map((_) => '(title LIKE ? OR content LIKE ?)').join(' OR ');
+    final args = [for (final a in t.plainAlts) ...['%$a%', '%$a%']];
     final rows = await db.query(
       _notes,
       columns: ['id', 'title', 'content', 'pinned', 'updated_at'],
@@ -91,12 +98,12 @@ class SearchRepository {
   }
 
   Future<List<RetrievalDoc>> _likeMemories(Database db, TermGroup t) async {
-    final where = t.alts.map((_) => 'content LIKE ?').join(' OR ');
+    final where = t.plainAlts.map((_) => 'content LIKE ?').join(' OR ');
     final rows = await db.query(
       _memories,
       columns: ['id', 'content', 'importance', 'updated_at'],
       where: where,
-      whereArgs: [for (final a in t.alts) '%$a%'],
+      whereArgs: [for (final a in t.plainAlts) '%$a%'],
       orderBy: 'updated_at DESC',
       limit: perTerm,
     );

@@ -26,7 +26,7 @@ class _FakeQwen extends IntentClassifier {
   Future<void> warmUp() async {}
 
   @override
-  Future<ZoeIntent?> classify(String text) async => guess;
+  Future<ZoeLabel?> label(String text) async => guess == null ? null : ZoeLabel(guess!);
 }
 
 /// Walang database: walang nahahanap.

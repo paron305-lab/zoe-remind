@@ -35,6 +35,13 @@ enum ZoeSituation {
   /// iaalok na i-save na lang bilang note (may card pagkatapos).
   memoryOff,
 
+  /// B6 implicit learning: {count} reminder na 8 AM o mas maaga →
+  /// "Mukhang gusto mo ng morning reminders — tandaan ko ba?" (+ memory card).
+  habitMorning,
+
+  /// B6 implicit learning: {count} reminder na 6 PM pataas.
+  habitEvening,
+
   /// RAG: natapos sa loob ng ilang araw ("last week", "this month").
   /// {range} = "Nov 9–Nov 15", {items}.
   doneRangeList,
@@ -425,6 +432,34 @@ class ZoeLines {
       ],
       ZoeLanguage.both: [
         'Naka-OFF ang long-term memory, kaya di ko ito maaalala. I-save ko na lang as note:',
+      ],
+    },
+    ZoeSituation.habitMorning: {
+      ZoeLanguage.english: [
+        "I noticed you've set {count} reminders for 8 AM or earlier. Looks like you like "
+            'morning reminders — should I remember that?',
+      ],
+      ZoeLanguage.tagalog: [
+        'Napansin ko, {count} beses ka nang nag-set ng paalala nang 8 AM o mas maaga. '
+            'Mukhang gusto mo ng paalala sa umaga — tatandaan ko ba?',
+      ],
+      ZoeLanguage.both: [
+        'Napansin ko, {count} beses ka nang nag-set ng reminder nang 8 AM o mas maaga. '
+            'Mukhang gusto mo ng morning reminders — tandaan ko ba?',
+      ],
+    },
+    ZoeSituation.habitEvening: {
+      ZoeLanguage.english: [
+        "I noticed you've set {count} reminders for 6 PM or later. Looks like evenings "
+            'work best for you — should I remember that?',
+      ],
+      ZoeLanguage.tagalog: [
+        'Napansin ko, {count} beses ka nang nag-set ng paalala nang 6 PM pataas. '
+            'Mukhang mas gusto mo ng paalala sa gabi — tatandaan ko ba?',
+      ],
+      ZoeLanguage.both: [
+        'Napansin ko, {count} beses ka nang nag-set ng reminder nang 6 PM pataas. '
+            'Mukhang mas gusto mo ng reminders sa gabi — tandaan ko ba?',
       ],
     },
     ZoeSituation.doneRangeList: {

@@ -3,10 +3,14 @@ import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/rag/query_terms.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
+import 'package:zoe_remind/rag/search_misses.dart';
 
 /// Developer › "Search index (RAG)": gumagana ba ang FTS4 sa phone na ito,
 /// tugma ba ang bilang ng notes / memories sa index, at subukan ang Retriever
 /// (makikita ang mga salitang hinanap at ang score ng bawat sagot).
+/// B6: ipinapakita rin ang tokenizer (unicode61 o simple), at ang mga tanong
+/// sa chat na walang nahanap (sa session na ito lang, hindi sine-save) —
+/// para malaman kung anong synonyms ang idadagdag sa query_terms.dart.
 class SearchCheckCard extends StatefulWidget {
   const SearchCheckCard({super.key});
 
@@ -88,6 +92,13 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
             ),
             const SizedBox(height: 4),
             Text('SQLite ${s.sqliteVersion}', style: const TextStyle(fontSize: 13)),
+            if (s.tokenizer != null)
+              Text(
+                s.tokenizer == 'unicode61'
+                    ? '✅ Tokenizer: unicode61 (Niño = nino)'
+                    : 'ℹ️ Tokenizer: simple (walang unicode61 sa phone na ito)',
+                style: const TextStyle(fontSize: 13),
+              ),
             for (final e in s.counts.entries)
               Text(
                 '${e.value.$2 == e.value.$1 ? '✅' : '⚠️'}  ${e.key}: '
@@ -137,9 +148,54 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
                   style: const TextStyle(fontSize: 13),
                 ),
             ],
+            const Divider(height: 24),
+            ValueListenableBuilder<int>(
+              valueListenable: SearchMisses.changes,
+              builder: (context, _, __) => _misses(),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  /// "Hindi nahanap sa chat" — mga tanong na walang sagot (RAM lang).
+  Widget _misses() {
+    final items = SearchMisses.items;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Hindi nahanap sa chat (${items.length})',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (items.isNotEmpty)
+              TextButton(onPressed: SearchMisses.clear, child: const Text('Clear')),
+          ],
+        ),
+        const Text(
+          'Sa session na ito lang, hindi sine-save. Idagdag sa synonyms '
+          '(query_terms.dart) ang salitang dapat tumama.',
+          style: TextStyle(fontSize: 12),
+        ),
+        if (items.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text('Wala pa — ayos!', style: TextStyle(fontSize: 13, color: _mint)),
+          ),
+        for (final m in items)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '❓ ${m.question}\n    salita: ${m.terms.isEmpty ? '—' : m.terms}',
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+      ],
     );
   }
 }

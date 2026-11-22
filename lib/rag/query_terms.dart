@@ -12,8 +12,12 @@ class TermGroup {
   /// FTS4 MATCH expression: `password* OR passcode* OR pw`.
   String get matchExpr => alts.map(QueryTerms.ftsTerm).join(' OR ');
 
+  /// [alts] na walang "=" (para sa LIKE fallback).
+  List<String> get plainAlts => alts.map(QueryTerms.bare).toList();
+
   @override
-  String toString() => alts.length == 1 ? word : '$word(${alts.skip(1).join('|')})';
+  String toString() =>
+      alts.length == 1 ? word : '$word(${alts.skip(1).map(QueryTerms.bare).join('|')})';
 }
 
 /// Ginagawang mga salitang hahanapin ang tanong ng user (EN / TL / Taglish).
@@ -24,9 +28,15 @@ class TermGroup {
 ///   "ano wifi password ko?"           → wifi, password
 ///   "saan ko nilagay ang susi ng kotse?" → susi, kotse
 ///   "what's my locker code"           → locker, code
+///   "kaarawan ni Niño?"               → kaarawan, niño (+ nino)
 ///
-/// Pareho ang paghati ng salita dito at sa FTS4 "simple" tokenizer ng SQLite:
-/// maliit na titik, hati sa bantas at space ("Wi-Fi" → wi, fi).
+/// Paghati ng salita (B6): gaya ng FTS4 "unicode61" tokenizer —
+/// maliit na titik, letra / numero lang (kahit ñ, é), hati sa bantas, space at
+/// emoji ("Wi-Fi" → wi, fi). [tokens] ay tinatanggal din ang tuldik
+/// ("Niño" → nino), gaya ng `remove_diacritics=1`.
+///
+/// Sa phone na "simple" tokenizer lang ang kaya, kasama pa rin sa [TermGroup.alts]
+/// ang orihinal na salita ("niño"), kaya nahahanap pa rin.
 class QueryTerms {
   QueryTerms._();
 
@@ -37,13 +47,38 @@ class QueryTerms {
   /// Mas maikli → eksakto lang ("pin" ≠ "pinya", "gym" ≠ "gymnast").
   static const prefixMin = 4;
 
-  /// Hindi letra / numero (ASCII) → hati. Ang non-ASCII (ñ, emoji) ay bahagi
-  /// ng salita, gaya ng FTS4 simple tokenizer.
-  static final _split = RegExp(r'[^a-z0-9\u0080-\uffff]+');
+  /// Hindi letra / numero (kahit anong wika) → hati.
+  static final _split = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
 
-  /// Mga salita sa text, maliit na titik.
-  static List<String> tokens(String text) =>
+  /// Tuldik → walang tuldik (Latin letters lang, gaya ng remove_diacritics=1).
+  static const _folds = {
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+    'ç': 'c',
+    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+    'ñ': 'n',
+    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+    'ý': 'y', 'ÿ': 'y',
+  };
+
+  static final _foldable = RegExp('[${_folds.keys.join()}]');
+
+  /// Maliit na titik + walang tuldik: "Niño" → "nino", "CAFÉ" → "cafe".
+  static String fold(String text) {
+    final lower = text.toLowerCase();
+    if (!_foldable.hasMatch(lower)) return lower;
+    return lower.replaceAllMapped(_foldable, (m) => _folds[m[0]!]!);
+  }
+
+  /// Mga salita sa text: maliit na titik, MAY tuldik pa ("niño").
+  static List<String> rawTokens(String text) =>
       text.toLowerCase().split(_split).where((t) => t.isNotEmpty).toList();
+
+  /// Mga salita sa text: maliit na titik, walang tuldik ("nino").
+  /// Ito ang ginagamit sa paghahambing (Retriever, memory de-dupe).
+  static List<String> tokens(String text) =>
+      fold(text).split(_split).where((t) => t.isNotEmpty).toList();
 
   /// Mga salitang hindi nakakatulong sa paghahanap ("ano", "ko", "the"…).
   /// Ginagamit din ng chat brain at ng memory de-dupe.
@@ -65,54 +100,120 @@ class QueryTerms {
     'saved', 'save', 'put', 'kept', 'keep', 'have', 'had', 'there', 's',
   };
 
-  /// Maliit na listahan ng magkakapareho. Bawat salita sa isang grupo ay
-  /// tumatama sa iba ("bday" → "birthday", "wifi" → "Wi-Fi").
+  /// Mga magkakapareho (EN / TL / Taglish). Bawat salita sa isang grupo ay
+  /// tumatama sa iba ("internet" → "wifi", "susi" → "keys", "bday" → "birthday").
+  ///
+  /// Mas murang alternatibo ito sa embeddings (B6): dagdagan lang dito kapag
+  /// may tanong na hindi nahanap (Developer › 8. Search index › Hindi nahanap).
+  ///
+  /// "=" sa unahan = EKSAKTO lang, hindi prefix, para sa salitang simula ng
+  /// ibang salita: "=mama" ≠ "mamaya", "=pass" ≠ "passport", "=home" ≠ "homework".
+  /// Lahat ay maliit na titik at walang tuldik.
   static const _synonyms = <List<String>>[
-    ['wifi', 'wi fi'],
-    ['password', 'passcode', 'pw', 'pwd'],
-    ['birthday', 'bday', 'kaarawan'],
-    ['address', 'tirahan', 'adres'],
-    ['number', 'numero', 'num'],
-    ['phone', 'cellphone', 'selpon', 'telepono', 'cp'],
-    ['susi', 'key', 'keys'],
+    // Bahay / gamit
+    ['wifi', 'wi fi', 'internet', 'router'],
+    ['password', 'passcode', 'pw', 'pwd', '=pass'],
     ['code', 'pin'],
-    ['gamot', 'medicine', 'meds'],
+    ['susi', 'key', 'keys', 'yawi'],
+    ['address', 'tirahan', 'adres'],
+    ['bahay', 'house', '=home'],
+    ['number', 'numero', 'num'],
+    ['phone', 'cellphone', 'selpon', 'telepono', 'cp', 'mobile', 'cel'],
+    ['email', 'e mail', 'gmail'],
+    ['size', 'sukat'],
+    ['recipe', 'resipe'],
+    // Tao
+    ['=mama', 'nanay', 'inay', 'mommy', 'mom', '=nay'],
+    ['=papa', 'tatay', 'itay', 'daddy', 'dad', '=tay'],
+    ['lola', 'grandma'],
+    ['lolo', 'grandpa'],
+    ['asawa', 'husband', 'wife', 'mister', 'misis'],
+    ['anak', 'son', 'daughter', 'kid', 'kids'],
+    ['name', 'pangalan'],
+    ['birthday', 'bday', 'kaarawan', 'birthdate'],
+    ['favorite', 'favourite', 'paborito', 'fave', 'fav'],
+    // Kalusugan
+    ['gamot', 'medicine', 'meds', 'medication'],
+    ['doctor', 'doktor', 'dok', 'dr'],
+    ['dentist', 'dentista'],
+    ['hospital', 'ospital'],
+    ['allergy', 'allergies', 'allergic'],
+    // Pera / bayarin
+    ['=bill', 'bills', 'bayarin', 'babayaran'],
+    ['kuryente', 'meralco', 'electricity', 'electric'],
+    ['tubig', 'water'],
+    ['rent', 'renta', 'upa'],
+    ['utang', 'debt', 'loan'],
+    ['bank', 'bangko'],
+    ['sweldo', 'sahod', 'salary', 'payday'],
+    // Labas
+    ['kotse', 'car', 'sasakyan', '=auto'],
+    ['motor', 'motorsiklo', 'motorcycle'],
+    ['plate', 'plaka'],
+    ['=work', 'trabaho', 'office', 'opisina'],
+    ['school', 'eskwela', 'paaralan', 'skul'],
+    ['grocery', 'groceries', 'palengke', 'market'],
+    ['meeting', 'miting'],
+    ['passport', 'pasaporte'],
+    ['license', 'licence', 'lisensya', 'lisensiya'],
+    ['ticket', 'tiket'],
   ];
 
+  /// "=mama" → "mama".
+  static String bare(String alt) => alt.startsWith('=') ? alt.substring(1) : alt;
+
   /// Ang mga salitang hahanapin, walang ulit, hanggang [maxTerms].
+  /// May tuldik ("niño") → kasama rin ang walang tuldik ("nino").
   static List<TermGroup> parse(String question) {
     final seen = <String>{};
     final groups = <TermGroup>[];
-    for (final w in tokens(question)) {
-      if (w.length < 2 || stopWords.contains(w) || !seen.add(w)) continue;
-      groups.add(TermGroup(w, _altsFor(w)));
+    for (final w in rawTokens(question)) {
+      final key = fold(w);
+      if (key.length < 2 || stopWords.contains(key) || !seen.add(key)) continue;
+      groups.add(TermGroup(w, _altsFor(w, key)));
       if (groups.length == maxTerms) break;
     }
     return groups;
   }
 
-  static List<String> _altsFor(String word) {
-    for (final group in _synonyms) {
-      if (group.contains(word)) return [word, ...group.where((w) => w != word)];
+  static List<String> _altsFor(String word, String key) {
+    List<String>? group;
+    for (final g in _synonyms) {
+      if (g.any((w) => bare(w) == key)) {
+        group = g;
+        break;
+      }
     }
-    return [word];
+    // "mama" na nasa listahan bilang "=mama" → eksakto rin ang tinype.
+    final exact = group?.contains('=$key') ?? false;
+    String mark(String w) => exact ? '=$w' : w;
+    return [
+      mark(word),
+      if (key != word) mark(key),
+      if (group != null) ...group.where((w) => bare(w) != key),
+    ];
   }
 
-  /// Isang alt bilang FTS4 term: phrase → `"wi fi"`, 4+ letra → `code*`.
+  /// Isang alt bilang FTS4 term: phrase → `"wi fi"`, 4+ letra → `code*`,
+  /// "=mama" → `mama` (eksakto).
   static String ftsTerm(String alt) {
+    if (alt.startsWith('=')) return bare(alt);
     if (alt.contains(' ')) return '"$alt"';
     return alt.length >= prefixMin ? '$alt*' : alt;
   }
 
   /// Tumatama ba ang [group] sa mga salita ng isang note / memory?
+  /// [docTokens] = galing sa [tokens] (walang tuldik).
   /// Parehong patakaran ng FTS4 (prefix kapag 4+ letra), para tugma ang
   /// score sa nakita ng database.
-  static bool groupIn(TermGroup group, List<String> docTokens) =>
-      group.alts.any((alt) => _altIn(alt, docTokens));
+  static bool groupIn(TermGroup group, List<String> docTokens) => group.alts.any(
+      (alt) => _altIn(fold(bare(alt)), docTokens, exact: alt.startsWith('=')));
 
-  static bool _altIn(String alt, List<String> doc) {
+  static bool _altIn(String alt, List<String> doc, {bool exact = false}) {
     final parts = alt.split(' ');
-    if (parts.length == 1) return doc.any((t) => _tokenMatches(alt, t));
+    if (parts.length == 1) {
+      return doc.any((t) => exact ? t == alt : _tokenMatches(alt, t));
+    }
     for (var i = 0; i + parts.length <= doc.length; i++) {
       var all = true;
       for (var j = 0; j < parts.length; j++) {

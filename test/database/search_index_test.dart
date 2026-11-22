@@ -25,6 +25,7 @@ import 'package:zoe_remind/rag/retriever.dart';
 Future<void> main() async {
   sqfliteFfiInit();
   final fts4 = await _hasFts4();
+  final unicode61 = fts4 && await _hasUnicode61();
   final skipFts = fts4
       ? false
       : 'Walang FTS4 ang SQLite sa PC na ito — i-check sa phone (Developer › 8. Search index)';
@@ -154,6 +155,45 @@ Future<void> main() async {
     expect(await count(StorageConstants.memoriesFtsTable), 0);
   }, skip: skipFts);
 
+  test('B6: unicode61 tokenizer — "nino" = "Niño", "cafe" = "CAFÉ"', () async {
+    final status = await ZoeDatabase.instance.searchIndexStatus();
+    expect(status.tokenizer, 'unicode61');
+    final repo = NoteRepository();
+    final id = await repo.add(title: 'Bday ni Niño', content: 'Kape sa CAFÉ ni Ñaña');
+    expect(await notesMatching('nino'), contains(id));
+    expect(await notesMatching('niño'), contains(id));
+    expect(await notesMatching('cafe'), contains(id));
+    expect(await notesMatching('nana'), contains(id));
+    final hits = await Retriever().search('kailan bday ni nino?');
+    expect(hits.first.doc.id, id);
+    await repo.delete(id);
+  }, skip: skipFts == false && !unicode61 ? 'Walang unicode61 ang SQLite sa PC na ito' : skipFts);
+
+  test('B6: lumang "simple" index → kusang nagiging unicode61, kumpleto pa rin', () async {
+    // Gayahin ang index mula B1 (simple tokenizer).
+    for (final t in ['ai', 'au', 'ad']) {
+      await db.execute('DROP TRIGGER IF EXISTS ${StorageConstants.notesFtsTable}_$t');
+    }
+    await db.execute('DROP TABLE ${StorageConstants.notesFtsTable}');
+    await db.execute('CREATE VIRTUAL TABLE ${StorageConstants.notesFtsTable} USING fts4(title, content)');
+    await db.execute('INSERT INTO ${StorageConstants.notesFtsTable} (docid, title, content) '
+        'SELECT id, title, content FROM notes');
+
+    final status = await ZoeDatabase.instance.rebuildSearchIndex();
+    expect(status.ready, isTrue);
+    expect(status.tokenizer, 'unicode61');
+    expect(status.inSync, isTrue);
+    final sql = await db.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE name = '${StorageConstants.notesFtsTable}'");
+    expect(sql.first['sql'] as String, contains('unicode61'));
+    expect(await notesMatching('zoe123'), [1]);
+
+    // Gumagana pa rin ang triggers pagkatapos ng paglipat.
+    final id = await NoteRepository().add(title: 'Piñata', content: 'para sa party');
+    expect(await notesMatching('pinata'), [id]);
+    await NoteRepository().delete(id);
+  }, skip: skipFts == false && !unicode61 ? 'Walang unicode61 ang SQLite sa PC na ito' : skipFts);
+
   test('status at rebuild (Developer screen)', () async {
     await db.execute('DELETE FROM ${StorageConstants.notesFtsTable}'); // sirain
     var status = await ZoeDatabase.instance.searchIndexStatus();
@@ -165,6 +205,19 @@ Future<void> main() async {
     expect(status.counts[StorageConstants.notesTable], (2, 2));
     expect(await notesMatching('zoe123'), [1]);
   }, skip: skipFts);
+}
+
+/// May unicode61 tokenizer ba (B6)?
+Future<bool> _hasUnicode61() async {
+  final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+  try {
+    await db.execute('CREATE VIRTUAL TABLE tok_probe USING fts4(a, ${ZoeDatabase.unicodeTokenizerSql})');
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    await db.close();
+  }
 }
 
 /// May FTS4 ba ang SQLite na gamit ng test (sqflite_common_ffi sa PC)?

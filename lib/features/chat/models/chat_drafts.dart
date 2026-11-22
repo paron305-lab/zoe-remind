@@ -75,11 +75,19 @@ class TaskDraft {
 /// "tandaan mo na mas gusto ko ng morning reminders" → long-term memory.
 /// Sine-save lang pagkatapos ng Accept, at kapag ON ang long-term memory.
 class MemoryDraft {
-  const MemoryDraft({required this.content});
+  const MemoryDraft({required this.content, this.habit});
 
   final String content;
 
-  MemoryDraft copyWith({String? content}) => MemoryDraft(content: content ?? this.content);
+  /// B6: hindi null = MUNGKAHI ni Zoe mula sa napansin niyang ugali
+  /// ("morning" / "evening"). Accept → source 'chat'. Huwag → hindi na itatanong.
+  /// null = sinabi mo mismo ("tandaan mo…") → source 'user'.
+  final String? habit;
+
+  bool get isSuggestion => habit != null;
+
+  MemoryDraft copyWith({String? content}) =>
+      MemoryDraft(content: content ?? this.content, habit: habit);
 }
 
 class NoteDraft {
