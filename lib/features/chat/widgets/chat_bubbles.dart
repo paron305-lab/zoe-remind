@@ -241,6 +241,7 @@ class ErrorBubble extends StatelessWidget {
 }
 
 /// "Anong oras?" + chips [8 AM] [12 PM] [7 PM] [Iba pa].
+/// "Reminder ba 'to, task, o note?" + chips [⏰ Reminder] [✅ Task] [📝 Note] [✖ Wala].
 class ClarifyBubble extends StatelessWidget {
   final ClarifyEntry entry;
   final ValueChanged<ClarifyChip> onChip;
@@ -272,7 +273,8 @@ class ClarifyBubble extends StatelessWidget {
                 for (final c in entry.chips)
                   ActionChip(
                     label: Text(c.label, style: ChatText.chip),
-                    avatar: c.time == null
+                    // Orasan lang sa "Iba pa" (time picker), hindi sa Reminder / Task chips.
+                    avatar: c.isTime && c.time == null
                         ? Icon(Icons.schedule_rounded, size: 18, color: HomeColors.lavender)
                         : null,
                     backgroundColor: ChatColors.surface,

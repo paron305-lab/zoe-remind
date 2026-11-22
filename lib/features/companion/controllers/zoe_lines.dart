@@ -14,6 +14,11 @@ enum ZoeSituation {
   askTime,
   askTaskTitle,
   askNote,
+
+  /// Hindi sigurado kung ano ang gusto ng user ("meeting 3pm bukas",
+  /// "kailangan kong magbayad…") → tatanungin muna, may chips:
+  /// ⏰ Reminder · ✅ Task · 📝 Note · (💜 Tandaan) · ✖ Wala.
+  askKind,
   todayFree,
   todayList,
   doneNone,
@@ -335,6 +340,20 @@ class ZoeLines {
       ZoeLanguage.english: ['What time?'],
       ZoeLanguage.tagalog: ['Anong oras?'],
       ZoeLanguage.both: ['Anong oras?'],
+    },
+    ZoeSituation.askKind: {
+      ZoeLanguage.english: [
+        'Should I make that a reminder, a task, or a note?',
+        'Just to be sure — is that a reminder, a task, or a note?',
+      ],
+      ZoeLanguage.tagalog: [
+        'Gagawin ko ba itong paalala, gawain, o note?',
+        'Para sigurado ako — paalala ba ito, gawain, o note?',
+      ],
+      ZoeLanguage.both: [
+        "Reminder ba 'to, task, o note?",
+        'Para sure ako — reminder, task, o note?',
+      ],
     },
     ZoeSituation.askTaskTitle: {
       ZoeLanguage.english: ["What's the task?"],

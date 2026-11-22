@@ -15,6 +15,7 @@ import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/controllers/chat_preview_brain.dart';
+import 'package:zoe_remind/features/chat/controllers/context_replies.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
@@ -132,26 +133,82 @@ class ZoeChatController extends ChangeNotifier {
 
   // ───────────────────────── Sending ─────────────────────────
 
-  Future<void> send(String raw) async {
+  /// Ipadala ang mensahe ng user.
+  /// Returns ang card na na-ACCEPT sa pamamagitan ng "oo" / "sige" (para ma-check
+  /// ng screen ang alarm permissions), o null.
+  Future<ConfirmEntry?> send(String raw) async {
     var text = raw.trim();
-    if (text.isEmpty || thinking || !canChat) return;
+    if (text.isEmpty || thinking || !canChat) return null;
     if (text.length > maxInput) text = text.substring(0, maxInput);
+
+    // Card na naghihintay (bago idagdag ang mensahe ng user).
+    final card = _pendingCardOnTop();
 
     entries.add(TextEntry(fromZoe: false, text: text));
     _notify();
     unawaited(_save('user', text));
 
-    // May hinihintay bang sagot si Zoe (title / oras)?
+    // "ay wag na pala" / "oo" / "mali, 8pm pala" → tungkol sa card sa itaas.
+    // (Pananakit sa sarili → laging crisis reply, hindi ito.)
+    if (card != null && !CrisisGuard.matches(text)) {
+      final handled = await _cardReply(card, text);
+      if (handled != null) return handled.accepted;
+    }
+
+    // May hinihintay bang sagot si Zoe (uri / title / oras)?
     final pending = _openClarify();
     if (pending != null) {
       pending.answered = true;
-      final next = _answerClarify(pending, text);
+      final next = await _answerClarify(pending, text);
       if (next != null) {
-        await _zoeSays([next]);
-        return;
+        await _zoeSays(next);
+        return null;
       }
     }
     await _respond(text);
+    return null;
+  }
+
+  /// Ang pinakahuling entry ay card na naghihintay ng Accept? (Info pills ay nilalaktawan.)
+  ConfirmEntry? _pendingCardOnTop() {
+    for (final e in entries.reversed) {
+      if (e is InfoEntry) continue;
+      return e is ConfirmEntry && e.isPending ? e : null;
+    }
+    return null;
+  }
+
+  /// Maikling sagot sa card. null = hindi tungkol sa card (normal na reply).
+  Future<_CardReply?> _cardReply(ConfirmEntry card, String text) async {
+    if (ContextReplies.isCancel(text)) {
+      cancel(card);
+      return const _CardReply();
+    }
+    if (ContextReplies.isYes(text)) {
+      final saved = await accept(card);
+      if (saved) {
+        entries.add(TextEntry(fromZoe: true, text: t('Done — saved! ✓', 'Ayan, na-save na! ✓')));
+        _notify();
+      }
+      return _CardReply(saved ? card : null);
+    }
+    final fixable = card.kind == DraftKind.reminder || card.kind == DraftKind.task;
+    if (fixable && ContextReplies.isCorrection(text, now: _brain.now)) {
+      final lower = ContextReplies.clean(text);
+      final time = _brain.parseTime(lower);
+      final day = _brain.parseDay(lower);
+      card.status = DraftStatus.cancelled; // papalitan ng bagong card
+      final fixed = card.kind == DraftKind.reminder
+          ? ConfirmEntry.reminder(card.reminder!.copyWith(time: time, date: day))
+          : ConfirmEntry.task(card.task!.copyWith(time: time, date: day));
+      await _zoeSays([
+        TextEntry(fromZoe: true, text: t("Got it, I fixed it. Here's the new one:",
+            'Sige, inayos ko. Ito na ang bago:')),
+        fixed,
+      ]);
+      return const _CardReply();
+    }
+    return null;
   }
 
   /// Retry ng error bubble → ipadala ulit nang hindi dinodoble ang user bubble.
@@ -225,23 +282,66 @@ class ZoeChatController extends ChangeNotifier {
     return null;
   }
 
-  /// Ang type ng user ay sagot sa tanong ni Zoe.
-  ChatEntry? _answerClarify(ClarifyEntry c, String text) {
+  /// Ang type ng user ay sagot sa tanong ni Zoe. null = hindi sagot (normal na reply).
+  Future<List<ChatEntry>?> _answerClarify(ClarifyEntry c, String text) async {
     // Kahit may nakabinbing tanong ("Anong oras?"), hindi ginagawang title o
     // note ang mensaheng tungkol sa pananakit sa sarili → crisis reply.
     if (CrisisGuard.matches(text)) return null;
+
+    // "Reminder ba 'to, task, o note?" → "task" / "reminder na lang" / "wag na".
+    if (c.asksKind) {
+      final kind = ContextReplies.kindFromText(text);
+      if (kind != null) {
+        if (kind == DraftKind.memory && !c.chips.any((x) => x.kind == DraftKind.memory)) {
+          return null; // walang Tandaan sa tanong na ito → normal na reply
+        }
+        return _brain.draftFor(kind, c.source!, language);
+      }
+      if (ContextReplies.isCancel(text)) {
+        return [TextEntry(fromZoe: true, text: _brain.skipLine(language))];
+      }
+      return null; // ibang mensahe → normal na reply
+    }
+
     final title = text.length > 100 ? text.substring(0, 100) : text;
     if (c.reminder != null) {
       final d = c.reminder!;
-      if (c.wantsText) return _brain.completeReminder(d.copyWith(title: title));
+      if (c.wantsText) return [_brain.completeReminder(d.copyWith(title: title))];
       // "Anong oras?" pero nag-type → subukang basahin ang oras.
-      final time = _brain.parseTime(text.toLowerCase());
-      if (time != null) return ConfirmEntry.reminder(d.copyWith(time: time));
+      final time = _brain.parseTime(ContextReplies.clean(text));
+      if (time != null) return [ConfirmEntry.reminder(d.copyWith(time: time))];
       return null; // ibang tanong → normal na reply
     }
-    if (c.task != null) return ConfirmEntry.task(c.task!.copyWith(title: title));
-    if (c.note != null) return ConfirmEntry.note(c.note!.copyWith(content: text));
+    if (c.task != null) return [ConfirmEntry.task(c.task!.copyWith(title: title))];
+    if (c.note != null) return [ConfirmEntry.note(c.note!.copyWith(content: text))];
     return null;
+  }
+
+  /// Pinindot ang chip ng uri ([⏰ Reminder] [✅ Task] [📝 Note] [💜 Tandaan] [✖ Wala]).
+  Future<void> pickKind(ClarifyEntry c, ClarifyChip chip) async {
+    if (c.answered || !c.asksKind || chip.isTime) return;
+    c.answered = true;
+    entries.add(TextEntry(fromZoe: false, text: chip.label));
+    _notify();
+    unawaited(_save('user', chip.label));
+    if (chip.skip) {
+      await _zoeSays([TextEntry(fromZoe: true, text: _brain.skipLine(language))]);
+      return;
+    }
+    List<ChatEntry> next;
+    try {
+      next = await _brain.draftFor(chip.kind!, c.source!, language);
+    } catch (e) {
+      debugPrint('Zoe chat: making card failed: $e');
+      next = [
+        ErrorEntry(
+          text: t('Sorry, something went wrong. Can you try again?',
+              'Pasensya, may mali. Pwede mo bang ulitin?'),
+          retryText: c.source!,
+        ),
+      ];
+    }
+    await _zoeSays(next);
   }
 
   /// Pinindot ang chip (8 AM / 12 PM / 7 PM o napili sa time picker).
@@ -504,4 +604,12 @@ class ZoeChatController extends ChangeNotifier {
         DraftKind.note => '✓ Note saved: ${Note.titleFrom(e.note!.title, e.note!.content)}',
         DraftKind.memory => '✓ Zoe will remember: ${e.memory!.content}',
       };
+}
+
+/// Resulta ng maikling sagot sa card ("oo" / "wag na" / "8pm pala").
+class _CardReply {
+  const _CardReply([this.accepted]);
+
+  /// Ang card na na-accept ("oo", "sige"); null = na-cancel o naitama.
+  final ConfirmEntry? accepted;
 }

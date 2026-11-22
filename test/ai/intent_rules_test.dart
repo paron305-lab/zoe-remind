@@ -212,4 +212,47 @@ void main() {
     // May negation sa isa pero totoo ang isa pa → nararamdaman pa rin.
     expect(IntentRules.isFeeling('hindi ako galit, pagod lang ako'), isTrue);
   });
+
+  // Phrase bank (Nov 22): sigurado vs hula. Hula → magtatanong muna ang chat.
+  test('sigurado: malinaw na utos → card agad', () {
+    for (final m in [
+      'remind me tomorrow at 7 PM to review my thesis',
+      'pls rmnd me 2mrw 8am to buy milk',
+      'paremind nmn aq bkas 7am mag-gym',
+      'gisingin mo ako bukas ng 5:30am',
+      'set an alarm for 6am',
+      'make a reminder mamaya to stretch',
+      'paalala bukas 7am: inom gamot',
+      'add task buy groceries on Saturday',
+      'lagay mo sa tasks ko: magbayad ng kuryente',
+      'pakilagay sa gawain ko na maglaba',
+      'i-note mo: wifi password ng office ay zoe123',
+    ]) {
+      expect(IntentRules.matchFull(m).sure, isTrue, reason: m);
+    }
+  });
+
+  test('hula: walang malinaw na utos → tanong muna', () {
+    final cases = {
+      'meeting kay boss 3pm bukas': ZoeIntent.createReminder,
+      'sunduin si mama 6 ng gabi': ZoeIntent.createReminder,
+      'kailangan kong magbayad ng kuryente sa Biyernes': ZoeIntent.createTask,
+      'I need to finish my report on Friday': ZoeIntent.createTask,
+      'reminder': ZoeIntent.createReminder,
+      'alarm': ZoeIntent.createReminder,
+      'alarm bukas': ZoeIntent.createReminder,
+      'task': ZoeIntent.createTask,
+    };
+    cases.forEach((m, want) {
+      final r = IntentRules.matchFull(m);
+      expect(r.intent, want, reason: m);
+      expect(r.sure, isFalse, reason: m);
+    });
+  });
+
+  test('text-speak at pambungad ("uy zoe", "pls")', () {
+    check(ZoeIntent.getToday, ['anu ganap ko 2day?', 'anu sched q bkas?', 'uy zoe ano gagawin ko today']);
+    check(ZoeIntent.searchNotes, ['uy zoe ano nga ulit locker code ko', 'hey zoe, anu ung code ng locker ko?']);
+    check(ZoeIntent.greeting, ['gm', 'gud am', 'hellooo', 'yo zoe']);
+  });
 }

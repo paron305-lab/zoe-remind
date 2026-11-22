@@ -59,11 +59,13 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
 
   // ───────────────────────── Actions ─────────────────────────
 
-  void _send() {
+  Future<void> _send() async {
     final text = _input.text;
     if (text.trim().isEmpty) return;
     _input.clear();
-    _chat.send(text);
+    // "oo" / "sige" sa card → na-accept na; i-check ang alarm permissions.
+    final accepted = await _chat.send(text);
+    if (accepted != null) await _afterSave(accepted);
   }
 
   /// "Remind me…" → ilagay sa input. Buong tanong → i-send agad.
@@ -100,7 +102,12 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
 
   Future<void> _accept(ConfirmEntry e) async {
     final saved = await _chat.accept(e);
-    if (!saved || !mounted) return;
+    if (saved) await _afterSave(e);
+  }
+
+  /// Na-save ang card (Accept o "oo"). Reminder → i-check ang permissions.
+  Future<void> _afterSave(ConfirmEntry e) async {
+    if (!mounted) return;
     // May kulang na permission → hindi tutunog ang alarm. Ipakita ang Setup.
     if (e.kind == DraftKind.reminder && await ReminderPermissions.instance.shouldPrompt()) {
       if (mounted) await context.push('/reminders/setup');
@@ -121,6 +128,11 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
   }
 
   Future<void> _chip(ClarifyEntry c, ClarifyChip chip) async {
+    // [⏰ Reminder] [✅ Task] [📝 Note] [💜 Tandaan] [✖ Wala]
+    if (!chip.isTime) {
+      await _chat.pickKind(c, chip);
+      return;
+    }
     var time = chip.time;
     if (time == null) {
       final next = DateTime.now().add(const Duration(hours: 1));

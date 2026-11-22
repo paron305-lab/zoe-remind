@@ -66,16 +66,33 @@ class ConfirmEntry extends ChatEntry {
   bool get isPending => status == DraftStatus.pending;
 }
 
-/// Isang quick-reply chip. [time] == null → "Iba pa" (bubuksan ang time picker).
+/// Isang quick-reply chip.
+///   Oras:  [8 AM] [12 PM] [7 PM] — [time]; "Iba pa" = time null (time picker).
+///   Uri:   [⏰ Reminder] [✅ Task] [📝 Note] [💜 Tandaan] — [kind].
+///   Wala:  [✖ Wala] — [skip] = true (walang gagawin).
 class ClarifyChip {
-  const ClarifyChip(this.label, this.time);
+  const ClarifyChip(this.label, this.time) : kind = null, skip = false;
+  const ClarifyChip.kind(this.label, DraftKind this.kind) : time = null, skip = false;
+  const ClarifyChip.skip(this.label) : time = null, kind = null, skip = true;
+
   final String label;
   final TimeOfDay? time;
+
+  /// Chip na pumipili ng uri (reminder / task / note / memory).
+  final DraftKind? kind;
+
+  /// "✖ Wala" — walang gagawin.
+  final bool skip;
+
+  /// Chip ng oras ("8 AM" o "Iba pa").
+  bool get isTime => kind == null && !skip;
 }
 
 /// Tanong ni Zoe kapag kulang ang detalye.
 /// - May [chips] → "Anong oras?" [8 AM] [12 PM] [Iba pa]
 /// - Walang chips → hinihintay ang susunod na type ng user (hal. title).
+/// - [source] != null → "Reminder ba 'to, task, o note?" (hindi sigurado si Zoe);
+///   ang [source] ay ang orihinal na mensahe na gagawing card kapag pumili.
 class ClarifyEntry extends ChatEntry {
   ClarifyEntry({
     required this.question,
@@ -83,6 +100,7 @@ class ClarifyEntry extends ChatEntry {
     this.reminder,
     this.task,
     this.note,
+    this.source,
   });
 
   final String question;
@@ -93,8 +111,14 @@ class ClarifyEntry extends ChatEntry {
   final TaskDraft? task;
   final NoteDraft? note;
 
+  /// Orihinal na mensahe (para sa "reminder / task / note?" na tanong).
+  final String? source;
+
   /// Nasagot na → wala nang chips.
   bool answered = false;
+
+  /// "Reminder ba 'to, task, o note?"
+  bool get asksKind => source != null;
 
   /// Kailangan ng title (type ng user ang sagot).
   bool get wantsText => chips.isEmpty;

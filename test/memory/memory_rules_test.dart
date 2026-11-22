@@ -78,4 +78,39 @@ void main() {
       expect(MemoryRules.sameMemory('Gusto ko ng kape', 'Gusto ko ng tsaa'), isFalse);
     });
   });
+
+  // Phrase bank (Nov 22): mas maraming paraan ng "tandaan mo".
+  group('isRememberAboutMe — bagong paraan ng pagsasabi', () {
+    for (final q in [
+      'you have to remember i love sinigang',
+      'remember i hate waking up early',
+      'remember: i prefer short replies',
+      'never forget that i am a nurse',
+      "note that i'm allergic to shrimp",
+      'fyi i love my dog choco',
+      'lagi mong tandaan na ayoko ng maanghang',
+      'wag mong kakalimutan na vegetarian ako',
+      'call me ac',
+      'tawagin mo akong ate joy',
+      'ac na lang itawag mo sa akin',
+      'my name is aaron',
+    ]) {
+      test('"$q"', () => expect(MemoryRules.isRememberAboutMe(q), isTrue));
+    }
+    for (final q in ['call me later', 'call me at 7', 'call me tomorrow', 'remember to buy milk at 7pm']) {
+      test('hindi: "$q"', () => expect(MemoryRules.isRememberAboutMe(q), isFalse));
+    }
+  });
+
+  test('mentionsReminder — "remind" na utos, hindi ang salitang "reminders"', () {
+    expect(MemoryRules.mentionsReminder('you have to remember everyday i love to remind about my happiness'),
+        isTrue);
+    expect(MemoryRules.mentionsReminder('tandaan mo na mas gusto ko ng morning reminders'), isFalse);
+  });
+
+  test('extract — tinatanggal ang bagong trigger', () {
+    expect(MemoryRules.extract('you have to remember I love sinigang'), 'I love sinigang');
+    expect(MemoryRules.extract('fyi I love my dog Choco'), 'I love my dog Choco');
+    expect(MemoryRules.extract('lagi mong tandaan na ayoko ng maanghang'), 'Ayoko ng maanghang');
+  });
 }

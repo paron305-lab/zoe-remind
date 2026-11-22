@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:zoe_remind/ai/parser/crisis_guard.dart';
 import 'package:zoe_remind/ai/parser/intent_classifier.dart';
 import 'package:zoe_remind/ai/parser/intent_rules.dart';
+import 'package:zoe_remind/ai/parser/text_normalizer.dart';
 import 'package:zoe_remind/ai/parser/when_parser.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
@@ -11,6 +12,7 @@ import 'package:zoe_remind/database/models/reminder_occurrence.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
+import 'package:zoe_remind/features/chat/controllers/chat_router.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
@@ -55,6 +57,12 @@ import 'package:zoe_remind/rag/retriever.dart';
 ///  10. Memories (B5): "tandaan mo na mas gusto ko ng morning reminders" →
 ///      memory card (Accept muna). OFF ang long-term memory → note card na lang.
 ///      Data ("tandaan mo, wifi password ay…") → note pa rin (MemoryRules).
+///  11. Tanong muna (phrase bank): kapag HINDI malinaw na utos
+///      ("meeting kay boss 3pm bukas", "kailangan kong magbayad…", "task",
+///      "remember… i love to remind about…", hula ni Qwen) → hindi agad card:
+///      "Reminder ba 'to, task, o note?" [⏰ Reminder] [✅ Task] [📝 Note] [✖ Wala].
+///      Malinaw na utos ("remind me…", "add task…", "i-note mo…") → card agad.
+///      Text-speak ("pls rmnd me 2mrw 8am") → TextNormalizer muna.
 ///
 /// Nararamdaman (2c):
 ///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
@@ -152,19 +160,14 @@ class ChatPreviewBrain {
   String _say(ZoeSituation s, [Map<String, String> vars = const {}]) =>
       ZoeLines.pickFor(_lang, s, _mood, vars);
 
-  /// Ano ang nararamdaman ng user sa mensaheng ito?
-  /// Ang "happy" sa tanong ("nice ba yung movie?") ay hindi binibilang.
-  static UserTone toneOf(String text) {
-    final tone = ToneDetector.detect(text).tone;
-    if (tone == UserTone.happy && text.trim().endsWith('?')) return UserTone.neutral;
-    return tone;
-  }
+  /// Ano ang nararamdaman ng user sa mensaheng ito? (Tingnan ang [ChatRouter.toneOf].)
+  static UserTone toneOf(String text) => ChatRouter.toneOf(text);
 
   Future<List<ChatEntry>> reply(String text, ZoeLanguage lang) async {
     _lang = lang;
     _mood = _moodOf();
-    final lower = text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
-    bool has(List<String> words) => words.any(lower.contains);
+    // Text-speak → buong salita ("pls rmnd me 2mrw" → "please remind me tomorrow").
+    final lower = ChatRouter.clean(text);
 
     // Laging una: pananakit sa sarili → nakahandang sagot + hotline.
     // Walang card, walang Qwen, walang ibang rule na makakasapaw,
@@ -180,9 +183,12 @@ class ChatPreviewBrain {
 
     if (lower == 'test error') throw StateError('UI preview error');
 
+    // Saan pupunta ang mensahe — iisang patakaran (ChatRouter, pure).
+    final route = ChatRouter.of(text);
+    final tone = route.tone;
+
     // Nararamdaman ng user → ipaalam sa MoodController (pagod → gentle si Zoe).
     // Ang mensahe ay hindi sine-save dito; ang mood ni Zoe ang nagbabago.
-    final tone = toneOf(text);
     // Mood log (7 araw): +1 sa bilang ng tone ngayong araw (hindi ang mensahe).
     // OFF sa Settings → walang binibilang. Neutral → wala.
     if (tone != UserTone.neutral) _logTone(tone);
@@ -197,49 +203,44 @@ class ChatPreviewBrain {
     final math = _math(lower);
     if (math != null) return [TextEntry(fromZoe: true, text: math)];
 
-    // "patayin mo ang alarm" → tulong, hindi bagong reminder.
-    if (IntentRules.isStopAlarm(lower)) {
-      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.stopAlarmHelp))];
-    }
+    // Pagod / stressed pero may utos → "Sige, isa-isa lang tayo." bago ang sagot.
+    List<ChatEntry> gently(List<ChatEntry> answer) => tone.isDown
+        ? [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...answer]
+        : answer;
 
-    // Code muna (agad). Kung hindi alam ng code → si Qwen sa [_answer].
-    final intent = IntentRules.match(lower);
+    switch (route.route) {
+      // "patayin mo ang alarm" → tulong, hindi bagong reminder.
+      case ZoeRoute.stopAlarm:
+        return [TextEntry(fromZoe: true, text: _say(ZoeSituation.stopAlarmHelp))];
 
-    // "salamat" / "thank you" (kahit may "ang galing mo") → pasasalamat.
-    if (intent == ZoeIntent.unknown && has(['salamat', 'thank'])) {
-      if (event == null) _report(const UserPositive()); // isang event lang
-      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
-    }
+      // "salamat" / "thank you" (kahit may "ang galing mo") → pasasalamat.
+      case ZoeRoute.thanks:
+        if (event == null) _report(const UserPositive()); // isang event lang
+        return [TextEntry(fromZoe: true, text: _say(ZoeSituation.thanks))];
 
-    // "tandaan mo na mas gusto ko ng morning reminders" → memory card (B5).
-    // Bago ang intent: ang "reminders" dito ay tatama sa reminder rule.
-    // (May oras / "bukas" → hindi memory — tingnan ang MemoryRules.)
-    // "do you remember that I like…?" = tanong (searchNotes) → hindi ise-save.
-    if (intent != ZoeIntent.searchNotes && MemoryRules.isRememberAboutMe(lower)) {
-      final card = await _memory(text);
-      if (!tone.isDown) return card;
-      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...card];
-    }
+      // "tandaan mo na mas gusto ko ng morning reminders" → memory card (B5).
+      case ZoeRoute.memory:
+        return gently(await _memory(text));
 
-    // "pagod na ako", "hi zoe, stressed ako" → script para sa nararamdaman.
-    // (Kapag may utos — reminder, task, listahan — ang utos pa rin ang sinusunod.)
-    final feeling = ZoeLines.situationForTone(tone);
-    if (feeling != null && (intent == ZoeIntent.unknown || intent == ZoeIntent.greeting)) {
-      final reply = TextEntry(fromZoe: true, text: _say(feeling));
-      // Level 2: ilang araw nang ganito? (isang beses lang kada araw)
-      final week = await _weekLine(tone);
-      if (week == null) return [reply];
-      // Pagod / stressed: "Mukhang busy ang linggo mo…" muna, saka ang script.
-      // Masaya: ang script muna, saka "Ang dami mong good days…".
-      return tone.isDown ? [week, reply] : [reply, week];
-    }
+      // Hindi malinaw ("meeting 3pm bukas", "kailangan kong…", "task",
+      // "remember… i love to remind…") → TANONG muna, hindi agad card.
+      case ZoeRoute.askKind:
+        return gently([askKind(text, memory: route.memoryChip)]);
 
-    // May utos pero pagod / stressed → maikling "isa-isa lang tayo" bago ang sagot.
-    final answer = await _answer(intent, text, lower);
-    if (tone.isDown) {
-      return [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...answer];
+      // "pagod na ako", "hi zoe, stressed ako" → script para sa nararamdaman.
+      case ZoeRoute.feeling:
+        final feeling = ZoeLines.situationForTone(tone)!;
+        final reply = TextEntry(fromZoe: true, text: _say(feeling));
+        // Level 2: ilang araw nang ganito? (isang beses lang kada araw)
+        final week = await _weekLine(tone);
+        if (week == null) return [reply];
+        // Pagod / stressed: "Mukhang busy ang linggo mo…" muna, saka ang script.
+        // Masaya: ang script muna, saka "Ang dami mong good days…".
+        return tone.isDown ? [week, reply] : [reply, week];
+
+      default:
+        return gently(await _answer(route.intent, text, lower));
     }
-    return answer;
   }
 
   /// Linya tungkol sa linggo (mood log), o null kung wala / nasabi na ngayong araw.
@@ -267,6 +268,10 @@ class ChatPreviewBrain {
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.comfort))];
       }
       intent = await _classifier.classify(text) ?? ZoeIntent.unknown;
+      // Hula ni Qwen na gumawa (reminder / task / note) → tanong muna, hindi card.
+      if (_isCreate(intent)) {
+        return [askKind(text, memory: MemoryRules.hasTrigger(lower))];
+      }
     } else if (!_warmStarted) {
       // Code ang sumagot ngayon. Habang nagbabasa ang user, ihanda na si Qwen
       // sa background para mabilis na siya kapag kinailangan mamaya.
@@ -317,6 +322,45 @@ class ChatPreviewBrain {
     }
   }
 
+  // ───────────────────────── Tanong muna (uri) ─────────────────────────
+
+  static bool _isCreate(ZoeIntent i) =>
+      i == ZoeIntent.createReminder || i == ZoeIntent.createTask || i == ZoeIntent.createNote;
+
+  /// "Reminder ba 'to, task, o note?" + chips. [memory] = may 💜 Tandaan chip.
+  /// Ang [text] ang gagawing card kapag pumili ang user ([draftFor]).
+  ClarifyEntry askKind(String text, {bool memory = false}) => ClarifyEntry(
+        question: _say(ZoeSituation.askKind),
+        source: text,
+        chips: [
+          ClarifyChip.kind(_t('⏰ Reminder', '⏰ Paalala'), DraftKind.reminder),
+          ClarifyChip.kind(_t('✅ Task', '✅ Gawain'), DraftKind.task),
+          const ClarifyChip.kind('📝 Note', DraftKind.note),
+          if (memory) ClarifyChip.kind(_t('💜 Remember', '💜 Tandaan'), DraftKind.memory),
+          ClarifyChip.skip(_t('✖ Never mind', '✖ Wala')),
+        ],
+      );
+
+  /// Pinili na ng user ang uri → gawin ang card mula sa orihinal na mensahe.
+  /// (Card pa rin — walang nase-save hangga't walang Accept.)
+  Future<List<ChatEntry>> draftFor(DraftKind kind, String text, ZoeLanguage lang) async {
+    _lang = lang;
+    _mood = _moodOf();
+    final lower = ChatRouter.clean(text);
+    return switch (kind) {
+      DraftKind.reminder => [_reminder(text, lower)],
+      DraftKind.task => [_task(text, lower)],
+      DraftKind.note => [_note(text)],
+      DraftKind.memory => await _memory(text),
+    };
+  }
+
+  /// "✖ Wala" / "wag na" sa tanong → maikling sagot, walang card.
+  String skipLine(ZoeLanguage lang) {
+    _lang = lang;
+    return _t("Okay, I won't save anything. 👍", 'Sige, wala akong ise-save. 👍');
+  }
+
   // ───────────────────────── Writes (cards) ─────────────────────────
 
   ChatEntry _reminder(String text, String lower) {
@@ -330,7 +374,7 @@ class ChatPreviewBrain {
     var title = _cleanTitle(text);
     // "wake me up at 6am" → walang natirang title, pero malinaw ang ibig sabihin.
     if (title.isEmpty && lower.contains('wake me')) title = 'Wake up';
-    if (title.isEmpty && lower.contains('gisingin')) title = _t('Wake up', 'Gumising');
+    if (title.isEmpty && lower.contains('gising')) title = _t('Wake up', 'Gumising');
     return completeReminder(ReminderDraft(title: title, date: day, time: time));
   }
 
@@ -375,7 +419,7 @@ class ChatPreviewBrain {
 
   /// Memory card. OFF ang long-term memory → paliwanag + note card na lang.
   Future<List<ChatEntry>> _memory(String text) async {
-    final content = MemoryRules.extract(text);
+    final content = MemoryRules.extract(TextNormalizer.normalize(text, forDisplay: true));
     if (content.isEmpty) return [_note(text)];
     if (!await _memoryOnSafe()) {
       return [
@@ -394,15 +438,18 @@ class ChatPreviewBrain {
     if (colon < 0) {
       for (final p in [
         r'\bzoe\b[,]?',
-        r'\b(pa)?(i-?save|i-?note)\s+mo(\s+(ito|to))?(\s+as\s+(a\s+)?note)?',
-        r'\b(save|add)\s+(this\s+)?(as\s+)?(a\s+)?(new\s+)?note\b',
+        r'^\s*((hey|hi|hello|uy|oy|yo|beh|ok|okay|sige|please|pls)[\s,!.]+)+',
+        r'\b(pa-?|paki-?)?(i-?save|i-?note|save|note)\s+(mo|nga)(\s+(nga|ito|to|lang|this))*(\s+as\s+(a\s+)?note)?\b',
+        r'\b(pa|paki)-?(note|save)\b(\s+(nga|mo|lang))*',
+        r'\b(save|add)\s+(this\s+|it\s+)?(as\s+)?(a\s+)?(new\s+)?note\b',
+        r'\bnote\s+(this|it)\b',
         r'\bnew\s+note\b',
         r'\b(paki[\s-]?)?tandaan\s+mo(\s+(ito|to))?(\s+na)?\b',
         r'\b(write|jot)\s+(this|it|that)\s+down\b',
         r'\bremember\s+(that|this)\b',
         r'\b(keep|save)\s+(this|it)(\s+for\s+me)?\b',
         r'\btake\s+note(\s+(that|of))?\b',
-        r'\b(isulat|i-?lista)\s+mo(\s+(ito|to))?(\s+na)?\b',
+        r'\b(isulat|i-?lista)\s+mo(\s+(nga|ito|to))*(\s+na)?\b',
       ]) {
         content = content.replaceAll(RegExp(p, caseSensitive: false), ' ');
       }
@@ -741,18 +788,41 @@ class ChatPreviewBrain {
   /// (Ginagamit din ng ZoeChatController sa chips na "Iba pa".)
   TimeOfDay? parseTime(String lower) => WhenParser.time(lower);
 
+  /// Araw sa sagot ng user ("bukas na lang", "sa Sabado") — para sa pagtatama.
+  DateTime? parseDay(String lower) => _day(lower);
+
+  /// Ngayon (para sa ContextReplies sa controller).
+  DateTime get now => _now();
+
   /// "Zoe, remind me tomorrow at 7 PM to review my thesis" → "Review my thesis"
   String _cleanTitle(String text) {
-    var s = text;
+    // "pls rmnd me 2mrw" → "please remind me tomorrow" bago tanggalin ang mga utos.
+    var s = TextNormalizer.normalize(text, forDisplay: true)
+        .replaceAll(RegExp(r'[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]|[:;]-?[)(DP]', unicode: true), ' ');
     for (final p in [
-      r'\bzoe\b[,:]?',
-      r'\b(pa[\s-]?)?remind\s+(me|ako|mo\s+ako)\b',
+      r'\bzoe\b[,:!]?',
+      r'\b(paki[\s-]?)?tandaan\s+mo\b[,:]?',
+      // Pambungad: "uy", "hey", "can you", "pwede mo bang", "i want you to"…
+      r'^\s*((hey|hi|hello|uy|oy|yo|beh|ok|okay|sige|please)[\s,!.]+)+',
+      r'\b(can|could|would|will)\s+(you|u)(\s+please)?\b',
+      r'\b(pwede|puwede)\s+(mo|ka)\s+ba(ng)?(\s+(akong|ako))?\b',
+      r"\b(i\s+(want|need)\s+you\s+to|need\s+you\s+to)\b",
+      r'\b(paki[\s-]?|ipa[\s-]?|pa[\s-]?|i[\s-]?)?remind(\s+(mo|naman|nga|nmn|po))*\s+(me|ako|ko|us|kami)\b',
+      r'\bremind\s+mo\b',
+      r'\bparemind(\s+(naman|nga|po))*(\s+(ako|me|kami))?\b',
+      r'\b(make|create|add|new|gumawa|gawa)(\s+(ka|mo|nga|naman))*(\s+(an?|the|ng))?\s+(reminder|alarm|paalala)\b',
+      r'\b(set|mag-?set|i-?set|pa-?set|paki[\s-]?set)(\s+(ka|mo|naman|po|nga))*(\s+(ng|an?|the|my))?\s+(alarm|reminder|paalala)\b',
+      r'\b(mag|i)-?alarm(\s+ka)?\b',
+      r'\b(magtakda|itakda)\s+(ng|ang)\s+(pampagising|hudyat|alarm|paalala)(\s+para\s+sa)?\b',
+      r'\b(paki[\s-]?)?gising(in)?\s+mo\s+(ako|ko|kami)\b',
+      r'\b(alert)\s+me\b',
+      r'^\s*(paalala|reminder|remind)\b[:]?',
       r'\b(please\s+)?wake\s+me(\s+up)?\b',
       r'\b(paki[\s-]?)?gisingin\s+mo\s+(ako|ko)\b',
       r'\b(paki[\s-]?)?(sabihan|abisuhan|i-?alert)\s+mo\s+(ako|ko)\b',
       r"\bdon'?t\s+let\s+me\s+forget\b",
-      r'\b(huwag|wag)\s+mo(ng)?\s+kalimutan(g)?\s+(sabihan|paalalahanan)\s+(ako|ko)\b',
-      r'\b(huwag|wag)\s+mo(ng)?\s+(akong\s+)?kalimutan(g)?\b',
+      r'\b(huwag|wag)\s+mo(ng)?\s+(ko(ng)?\s+|akong\s+)?kalimutan(g)?'
+          r'(\s+(sabihan|paalalahanan|ipaalala|i-?remind))?(\s+(ako|ko))?\b',
       r"\b(i\s+need\s+to|i\s+have\s+to|i\s+got\s+to|i'?ve\s+got\s+to|i\s+must|i\s+should|i\s+gotta)\b",
       r'\b(kailangan|kelangan|need)\s+ko(ng)?\b',
       r'\bdapat\s+(ko(ng)?|akong)\b',
@@ -760,11 +830,18 @@ class ChatPreviewBrain {
       r'\b(ang\s+)?title\s*(ay|is|:)?',
       r'\b(time|oras)\s*(ay|is|:)?\s*(?=\d)',
       '\\b(on|sa|ng|noong)?\\s*${WhenParser.monthDatePattern}',
-      r'\b(pa)?paalala(han)?\s+mo\s+(ako|ko)\b',
+      r'\b(pa)?paalala(han|hanan)?\s+mo(\s+(naman|nga|po))*\s+(ako|ko|kami|sakin|sa\s+akin)\b',
+      // "ngayong gabi", "mamayang hapon" (bago ang "ngayon" / "mamaya")
+      r'\b(ngayong|mamayang|nitong)\s+(gabi|umaga|hapon|tanghali)\b',
       r'\bipaalala\s+mo(\s+sa\s+akin)?\b',
       r'\bset\s+(an?\s+)?(alarm|reminder)\b',
       r'\b(add|create|new)\s+(an?\s+)?(task|todo|to-do)\b',
-      r'\b(task|todo|to-do|gawain)\b[:]?',
+      // "add X to my tasks", "lagay mo sa tasks ko: X", "pakilagay sa gawain ko na X"
+      r'\b(to|in|on)\s+(my|the)\s+(tasks?|to-?dos?|to-?do\s+list|list)\b',
+      r'\b(sa|ng)\s+(listahan\s+ng\s+)?(tasks?|to-?dos?|gawain|listahan)(\s+(ko|natin))?\b',
+      r'\b(add|i-?add|pa-?add|paki-?add|isama|(paki-?)?lagay|ilagay|(paki-?)?dagdag|idagdag)'
+          r'(\s+(mo|nga|naman|po|this|it))*\b',
+      r'\b(task|tasks|todo|to-do|gawain)\b[:]?',
       // "\b" pagkatapos ng am/pm: ang "5 ampalaya" ay hindi oras.
       r'\b((at|by|sa|ng|mga)\s+)*\d{1,2}(:\d{2})?\s*(am\b|pm\b|a\.m\.|p\.m\.)',
       // "5 ng hapon", "alas 3 ng madaling araw"
@@ -784,9 +861,19 @@ class ChatPreviewBrain {
       s = s.replaceAll(RegExp(p, caseSensitive: false), ' ');
     }
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    // pampalambot sa hulihan: "please", "po", "naman", "ha", "thanks", "asap"…
+    final tail = RegExp(
+        r'[\s,]*\b(please|po|naman|nga|ha|lang|thanks|thank you|salamat|asap|for me|sa akin|sakin)\b[\s.!?]*$',
+        caseSensitive: false);
+    while (tail.hasMatch(s)) {
+      s = s.replaceFirst(tail, '');
+    }
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     // tanggalin ang "to", "na", "ng", "mga", "para", bantas sa unahan / hulihan
     s = s.replaceFirst(
-        RegExp(r'^((to|na|ng|mga|para|that|about)\s+)+', caseSensitive: false), '');
+        RegExp(r'^[\s,.:;!?-]*((to|na|ng|mga|para|that|about|yung|ang|sa|for|po|naman|nga|please|ako|me)\s+)+',
+            caseSensitive: false),
+        '');
     s = s.replaceAll(RegExp(r'^[\s,.:;!?-]+|[\s,.:;!?-]+$'), '');
     if (s.isEmpty) return '';
     final title = s[0].toUpperCase() + s.substring(1);

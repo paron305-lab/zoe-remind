@@ -10,15 +10,24 @@ import 'package:zoe_remind/rag/query_terms.dart';
 ///   "tandaan mo na mas gusto ko ng morning reminders" → MEMORY (tungkol sa iyo)
 ///   "remember that I'm vegetarian"                  → MEMORY
 ///   "tandaan mo, gisingin mo ako 6am"               → hindi memory (may oras → reminder)
+///   "you have to remember i love sinigang"          → MEMORY
+///   "call me AC" / "tawagin mo akong AC"            → MEMORY (kahit walang "tandaan")
+///   "remember… i love to remind about…"             → TANONG muna (memory o reminder?)
 class MemoryRules {
   MemoryRules._();
 
   /// Pinakamahabang memory na sine-save.
   static const maxLength = 300;
 
-  static const _triggerPattern = r'\b(?:paki[\s-]?)?tandaan\s+mo\b'
-      r'|\bremember\s+(?:that|this)\b|\bplease\s+remember\b|\bkeep\s+in\s+mind\b'
-      r"|\b(?:isaisip|isa-isip|alalahanin)\s+mo\b|\bdon'?t\s+forget\s+that\b";
+  static const _triggerPattern = r'\b(?:paki[\s-]?)?tandaan\s+mo\b|\blagi\s+mong\s+tandaan\b'
+      r'|\btatandaan\s+mo\b'
+      r'|\b(?:(?:you\s+(?:have|need)\s+to|you\s+should|please|always)\s+)?remember'
+      r"(?:\s*(?:that|this)\b|\s*:|\s+(?=(?:i|i'm|im|my|me|na|ako|ko)\b))"
+      r'|\b(?:you\s+(?:have|need)\s+to|please|always)\s+remember\b'
+      r'|\bkeep\s+in\s+mind\b|\b(?:isaisip|isa-isip|alalahanin)\s+mo\b'
+      r"|\b(?:don'?t|never)\s+forget\b(?:\s+that\b)?"
+      r'|\b(?:huwag|wag)\s+mong?\s+(?:kakalimutan|kalimutan)\s+na\b'
+      r"|\bnote\s+that\s+(?=(?:i|i'm|im|my)\b)|\bfor\s+the\s+record\b|\bfyi\b";
 
   /// "tandaan mo", "remember that", "keep in mind"…
   static final _trigger = RegExp(_triggerPattern, caseSensitive: false);
@@ -34,17 +43,42 @@ class MemoryRules {
     r"|\bvegetarian\b|\bvegan\b|\bi'?m\s+an?\b|\bi\s+am\s+an?\b|\bako\s+ay\b",
   );
 
+  /// Pangalan / tawag sa user — memory kahit walang "tandaan mo".
+  /// "call me AC", "tawagin mo akong AC", "AC na lang itawag mo sa akin",
+  /// "my name is Aaron". Hindi: "call me later", "call me at 7".
+  static final _identity = RegExp(
+    r"\bcall\s+me\s+(?!(?:later|tomorrow|back|when|if|at|tonight|maybe|now|asap|again|in|on|after)\b)[a-z0-9]"
+    r'|\btawagin\s+mo\s+(?:akong|ako)\s+(?:na\s+)?[a-z0-9]'
+    r'|\b[a-z0-9]+\s+na\s+lang\s+(?:ang\s+)?(?:itawag|tawag)\s+mo\s+(?:sa\s+akin|sakin)\b'
+    r'|\bmy\s+name\s+is\s+[a-z]|\b(?:ang\s+)?pangalan\s+ko\s+ay\s+[a-z]',
+  );
+
+  /// Utos na magpaalala sa loob ng memory na mensahe → TANUNGIN muna.
+  /// ("reminders" na pangngalan ay hindi kasama: "gusto ko ng morning reminders").
+  static final _remindVerb = RegExp(
+    r'\b(?:remind(?:ed|ing)?|i-?remind|pa-?remind|paremind|paalalahanan|ipaalala|pinapaalala'
+    r'|gisingin|ginigising|gigisingin|wake\s+me|waking\s+me)\b',
+  );
+
   /// Malapit na oras → reminder / note, hindi memory.
   static final _soon =
       RegExp(r'\b(?:bukas|tomorrow|mamaya|mamayang|tonight|ngayong\s+gabi)\b|\blater\s+today\b');
 
-  /// true = "tandaan mo / remember that" + tungkol sa iyo + walang oras.
-  /// [lower] = maliit na titik.
+  /// true = ("tandaan mo / remember that" + tungkol sa iyo) o pangalan,
+  /// at walang oras. [lower] = maliit na titik (na-normalize na).
   static bool isRememberAboutMe(String lower) {
-    if (!_trigger.hasMatch(lower) || !_aboutMe.hasMatch(lower)) return false;
+    final aboutMe = _trigger.hasMatch(lower) && _aboutMe.hasMatch(lower);
+    if (!aboutMe && !_identity.hasMatch(lower)) return false;
     if (WhenParser.time(lower) != null || _soon.hasMatch(lower)) return false;
     return true;
   }
+
+  /// May "tandaan mo / remember" ba? (Para sa 💜 Tandaan chip sa tanong.)
+  static bool hasTrigger(String lower) => _trigger.hasMatch(lower) || _identity.hasMatch(lower);
+
+  /// May utos na magpaalala ("remind", "gisingin")? Kapag memory + ito →
+  /// hindi sigurado si Zoe → magtatanong: tandaan ba, o gawing reminder?
+  static bool mentionsReminder(String lower) => _remindVerb.hasMatch(lower);
 
   /// "Zoe, tandaan mo na mas gusto ko ng morning reminders."
   ///   → "Mas gusto ko ng morning reminders"
