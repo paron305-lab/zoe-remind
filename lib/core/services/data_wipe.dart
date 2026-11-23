@@ -7,6 +7,7 @@ import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/wipe_repository.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
+import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 
 /// Iisang "Burahin lahat ng data" ng buong app.
 /// Lahat ng button na nagbubura ng LAHAT ay dapat dito dumaan.
@@ -27,6 +28,10 @@ class DataWipe {
   final _wipe = WipeRepository();
 
   bool _running = false;
+
+  /// Tumataas pagkatapos ng bawat wipe — para sa mga screen na walang
+  /// sariling listener (hal. Tasks).
+  final done = ValueNotifier<int>(0);
 
   /// Huling error (para sa Developer screen). null = ayos.
   String? lastError;
@@ -67,7 +72,9 @@ class DataWipe {
   }
 
   void _notifyScreens() {
-    ChatHistoryRepository.changes.value++;
+    done.value++;
+    ReminderAlarmService.instance.changes.value++; // Home + History
+    ChatHistoryRepository.changes.value++; // Settings + Zoe Chat
     MemoryRepository.changes.value++;
     NoteRepository.changes.value++;
     SettingsRepository.changes.value++;

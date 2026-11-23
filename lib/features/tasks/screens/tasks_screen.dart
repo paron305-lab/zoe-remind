@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/core/theme/zoe_theme.dart';
+import 'package:zoe_remind/core/services/data_wipe.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
@@ -51,6 +52,8 @@ class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _search.addListener(() => setState(() {}));
+    // Settings › "Burahin lahat ng data" → i-refresh.
+    DataWipe.instance.done.addListener(_load);
     _load();
     _minuteTimer = Timer.periodic(const Duration(minutes: 1), (_) => _tick());
   }
@@ -58,6 +61,7 @@ class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    DataWipe.instance.done.removeListener(_load);
     _minuteTimer?.cancel();
     _snackTimer?.cancel();
     _search.dispose();

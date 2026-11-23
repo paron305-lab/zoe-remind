@@ -107,6 +107,13 @@ class WipeRepository {
     return out;
   }
 
+  /// Developer: naka-ON ba ang secure_delete sa connection na ito.
+  Future<bool> secureDeleteOn() async {
+    final db = await ZoeDatabase.instance.database;
+    final rows = await db.rawQuery('PRAGMA secure_delete');
+    return rows.isNotEmpty && rows.first.values.first == 1;
+  }
+
   static Future<Set<String>> _tableNames(DatabaseExecutor db) async {
     final rows = await db.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table'");
     return rows.map((r) => r['name'] as String).toSet();

@@ -9,6 +9,7 @@ import 'package:zoe_remind/core/constants/model_tier.dart';
 import 'package:zoe_remind/core/device/device_memory.dart';
 import 'package:zoe_remind/core/theme/zoe_theme.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
+import 'package:zoe_remind/core/services/data_wipe.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/model_info.dart';
 import 'package:zoe_remind/database/repositories/chat_history_repository.dart';
@@ -564,6 +565,33 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     await _save(_moodLog.clearAll, ok: 'Nabura na ang mood log');
   }
 
+  /// Iisang "Burahin lahat ng data" (DataWipe). Isang tanong lang —
+  /// malinaw ang mabubura at hindi mababawi. Pagkatapos: dito pa rin sa app.
+  Future<void> _wipeAll() async {
+    final ok0 = await confirmAction(
+      context,
+      palette: _p,
+      title: 'Burahin lahat ng data?',
+      message: 'Mabubura ang lahat ng tasks, reminders (at alarms), notes, '
+          'usapan ninyo ni Zoe, memories, mood at history. '
+          'Hindi na ito mababawi.\n\n'
+          'Maiiwan: pangalan mo, language, settings ng app, at ang na-download na Zoe.',
+      confirmLabel: 'Burahin lahat',
+    );
+    if (!ok0 || !mounted) return;
+
+    setState(() => _busy = true);
+    final ok = await DataWipe.instance.wipeAll();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ZoeSnack.show(
+      context,
+      ok ? 'Nabura na lahat. Bagong simula tayo 🌱' : "Hindi natapos ang pagbura. Subukan ulit.",
+      error: !ok,
+    );
+    await _load();
+  }
+
   /// "Pagod 2 · Stressed 1 · Masaya 3" — o "Wala pa" kapag walang laman.
   String _moodWeekSubtitle() {
     if (!_moodLog.enabled.value) return 'OFF';
@@ -811,11 +839,23 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                         title: 'Ngayong linggo',
                         subtitle: _moodWeekSubtitle(),
                         palette: p,
+                        trailing: _ClearButton(
+                          palette: p,
+                          label: 'Burahin',
+                          onTap: _moodWeek.isEmpty ? null : _clearMoodLog,
+                        ),
+                      ),
+                      SettingsTile(
+                        icon: Icons.delete_forever_outlined,
+                        title: 'Burahin lahat ng data',
+                        subtitle: 'Tasks, reminders, notes, chats, memories at mood. '
+                            'Maiiwan ang pangalan mo, settings at si Zoe (model).',
+                        palette: p,
                         showDivider: false,
                         trailing: _ClearButton(
                           palette: p,
-                          label: 'Burahin lahat',
-                          onTap: _moodWeek.isEmpty ? null : _clearMoodLog,
+                          label: _busy ? '…' : 'Burahin',
+                          onTap: _busy ? null : _wipeAll,
                         ),
                       ),
 
