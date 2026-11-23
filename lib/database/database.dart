@@ -55,9 +55,18 @@ class ZoeDatabase {
     return openDatabase(
       path,
       version: _version,
+      // Bawat bukas: kapag may binura, pinapatungan ng zero ang lumang
+      // laman sa file — hindi na mababasa kahit buksan ang zoe.db.
+      onConfigure: (db) async {
+        try {
+          await db.rawQuery('PRAGMA secure_delete = ON');
+        } catch (e) {
+          debugPrint('secure_delete not available: $e');
+        }
+      },
       onCreate: (db, version) async {
         await _createAllTables(db);
-        await _seedTaskCategories(db);
+        await seedTaskCategories(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         await _createAllTables(db);
@@ -226,7 +235,7 @@ class ZoeDatabase {
     }
     if (oldVersion < 7) {
       await _addColumnIfMissing(db, StorageConstants.tasksTable, 'missed_at', 'TEXT');
-      await _seedTaskCategories(db);
+      await seedTaskCategories(db);
       // Ang mga lumang na-miss na task ay mare-record ng
       // TaskRepository.recordMissed() pagbukas ng Tasks screen.
     }
@@ -281,11 +290,11 @@ class ZoeDatabase {
     await db.execute('ALTER TABLE model_state_new RENAME TO model_state');
   }
 
-  /// Ang 7 dating categories. Isang beses lang ito tinatawag
-  /// (bagong install o pag-upgrade sa v7), kaya kapag dinelete ng user
-  /// ang isa, hindi na ito babalik.
+  /// Ang 7 dating categories. Tinatawag sa bagong install, pag-upgrade sa v7,
+  /// at pagkatapos ng "Burahin lahat" (WipeRepository). Kapag dinelete ng user
+  /// ang isa, hindi na ito babalik — maliban kung burahin lahat.
   /// Pareho ang key sa dati, kaya walang task na kailangang baguhin.
-  static Future<void> _seedTaskCategories(Database db) async {
+  static Future<void> seedTaskCategories(DatabaseExecutor db) async {
     const seed = [
       ('study', 'Study', 0xFF3FBE93),
       ('thesis', 'Thesis', 0xFFF0768E),
