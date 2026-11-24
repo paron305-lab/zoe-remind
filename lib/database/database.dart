@@ -33,7 +33,8 @@ class ZoeDatabase {
   ///      kahit walang FTS4 ang isang phone ay bumubukas pa rin ang app.
   ///      B6: "unicode61" tokenizer kapag kaya ng phone (Niño = nino);
   ///      kusang inililipat ang lumang "simple" index — walang version bump.
-  static const _version = 13;
+  /// v14: memories.kind + memories.value (Level 3 Companion memory).
+  static const _version = 14;
 
   Future<Database>? _opening;
 
@@ -247,6 +248,14 @@ class ZoeDatabase {
     }
     if (oldVersion < 10) {
       await _rebuildModelState(db);
+    }
+    if (oldVersion < 14) {
+      // Level 3: anong klaseng memory (nickname, style, stress_help, win,
+      // routine, general) + ang value nito ("AC", "diretso", "listen").
+      // Ang lumang memories ay 'general' lahat.
+      await _addColumnIfMissing(
+          db, StorageConstants.memoriesTable, 'kind', "TEXT NOT NULL DEFAULT 'general'");
+      await _addColumnIfMissing(db, StorageConstants.memoriesTable, 'value', 'TEXT');
     }
     // v13: walang column change. Ang notes_fts / memories_fts ay ginagawa
     // at pinupuno sa onOpen (_ensureSearchIndex) — kasama ang lumang notes.
@@ -557,7 +566,9 @@ class ZoeDatabase {
         source TEXT NOT NULL DEFAULT 'chat',
         importance INTEGER NOT NULL DEFAULT 3,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'general',
+        value TEXT
       )
     ''');
 

@@ -69,11 +69,15 @@ class ConfirmEntry extends ChatEntry {
 /// Isang quick-reply chip.
 ///   Oras:  [8 AM] [12 PM] [7 PM] — [time]; "Iba pa" = time null (time picker).
 ///   Uri:   [⏰ Reminder] [✅ Task] [📝 Note] [💜 Tandaan] — [kind].
+///   Tulong (Level 3): [🎧 Makinig] [💡 Payo] [😄 Pampagaan] — [help].
 ///   Wala:  [✖ Wala] — [skip] = true (walang gagawin).
 class ClarifyChip {
-  const ClarifyChip(this.label, this.time) : kind = null, skip = false;
-  const ClarifyChip.kind(this.label, DraftKind this.kind) : time = null, skip = false;
-  const ClarifyChip.skip(this.label) : time = null, kind = null, skip = true;
+  const ClarifyChip(this.label, this.time) : kind = null, skip = false, help = null;
+  const ClarifyChip.kind(this.label, DraftKind this.kind) : time = null, skip = false, help = null;
+  const ClarifyChip.skip(this.label) : time = null, kind = null, skip = true, help = null;
+
+  /// Level 3: "Kapag stressed ka, ano'ng nakakatulong?" — 'listen' / 'advice' / 'lighten'.
+  const ClarifyChip.help(this.label, String this.help) : time = null, kind = null, skip = false;
 
   final String label;
   final TimeOfDay? time;
@@ -84,8 +88,11 @@ class ClarifyChip {
   /// "✖ Wala" — walang gagawin.
   final bool skip;
 
+  /// Chip ng stress help (StressHelp.value).
+  final String? help;
+
   /// Chip ng oras ("8 AM" o "Iba pa").
-  bool get isTime => kind == null && !skip;
+  bool get isTime => kind == null && !skip && help == null;
 }
 
 /// Tanong ni Zoe kapag kulang ang detalye.
@@ -101,6 +108,7 @@ class ClarifyEntry extends ChatEntry {
     this.task,
     this.note,
     this.source,
+    this.asksHelp = false,
   });
 
   final String question;
@@ -113,6 +121,9 @@ class ClarifyEntry extends ChatEntry {
 
   /// Orihinal na mensahe (para sa "reminder / task / note?" na tanong).
   final String? source;
+
+  /// Level 3: "Kapag stressed ka, ano'ng nakakatulong?" (isang beses lang).
+  final bool asksHelp;
 
   /// Nasagot na → wala nang chips.
   bool answered = false;

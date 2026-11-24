@@ -21,6 +21,7 @@ import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/onboarding/widgets/profile_page.dart' show showPolicySheet;
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
+import 'package:zoe_remind/features/settings/screens/memories_screen.dart';
 import 'package:zoe_remind/features/settings/widgets/brain_card.dart';
 import 'package:zoe_remind/features/settings/widgets/profile_card.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_dialogs.dart';
@@ -804,7 +805,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                       ),
                       SettingsTile(
                         icon: Icons.auto_awesome_outlined,
-                        title: "Zoe's memories",
+                        title: MemoriesScreen.title,
                         subtitle: _count(_memoryCount, 'memory', 'memories'),
                         onTap: () => context.push('/settings/memories'),
                         palette: p,

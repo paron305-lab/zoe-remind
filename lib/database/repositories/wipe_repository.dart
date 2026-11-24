@@ -48,6 +48,8 @@ class WipeRepository {
   static const userSettingKeys = [
     'mood_log_noted_on',
     'occurrences_scanned_until',
+    // Level 3: naitanong na ba ang "Kapag stressed ka, ano'ng nakakatulong?"
+    'companion_help_asked',
   ];
 
   /// Settings keys na nagsisimula sa mga ito (hal. habit_suggest_study).

@@ -193,7 +193,7 @@ class ConfirmCard extends StatelessWidget {
                 ),
                 child: Text(entry.memory!.content, style: ChatText.cardMeta),
               ),
-            _Meta(Icons.auto_awesome_outlined, "Settings › Zoe's memories"),
+            _Meta(Icons.auto_awesome_outlined, "Settings › Ano'ng alam ni Zoe"),
           ],
         );
     }

@@ -9,12 +9,14 @@ import 'package:zoe_remind/ai/parser/when_parser.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
 import 'package:zoe_remind/database/models/reminder_occurrence.dart';
+import 'package:zoe_remind/database/repositories/memory_repository.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/controllers/chat_router.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
+import 'package:zoe_remind/features/companion/controllers/companion_lines.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_now.dart';
@@ -25,6 +27,8 @@ import 'package:zoe_remind/features/companion/models/mood_week.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/reminders/models/reminder_status.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/memory/companion_facts.dart';
+import 'package:zoe_remind/memory/companion_profile.dart';
 import 'package:zoe_remind/memory/habit_rules.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
 import 'package:zoe_remind/rag/history_query.dart';
@@ -69,6 +73,14 @@ import 'package:zoe_remind/rag/search_misses.dart';
 ///      Malinaw na utos ("remind me…", "add task…", "i-note mo…") → card agad.
 ///      Text-speak ("pls rmnd me 2mrw 8am") → TextNormalizer muna.
 ///
+/// Level 3 Companion memory (galing sa memories, sinabi / kinumpirma ng user):
+///   "call me AC"                 → memory card "Call me AC" → bati: "Hi, AC!"
+///   "diretsuhin mo lang ako"     → maikli ang mga linya, walang "isa-isa lang tayo"
+///   "malambing ka sa akin"       → mas malambot ang mga linya
+///   "kapag stressed ako, makinig ka muna" → sa susunod na stressed: makikinig
+///   Wala pang stress help + down ang user → isang beses lang magtatanong:
+///   "Kapag stressed ka, ano'ng nakakatulong?" [🎧 Makinig] [💡 Payo] [😄 Pampagaan] [✖ Huwag na]
+///
 /// Nararamdaman (2c):
 ///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
 ///   "hi zoe, stressed ako"      → feelingStressed (hindi na bati)
@@ -103,6 +115,9 @@ class ChatPreviewBrain {
     Future<WeekVibe?> Function(UserTone tone)? weekNote,
     DateTime Function()? clock,
     Future<Map<int, DateTime>> Function()? activeAlarms,
+    Future<CompanionProfile> Function()? profile,
+    Future<bool> Function()? helpAsked,
+    Future<void> Function()? markHelpAsked,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
         _retriever = retriever ?? Retriever(),
@@ -113,7 +128,15 @@ class ChatPreviewBrain {
         _logTone = onTone ?? MoodLog.instance.record,
         _weekNote = weekNote ?? MoodLog.instance.noteFor,
         _clock = clock ?? DateTime.now,
-        _activeAlarms = activeAlarms ?? ReminderAlarmService.instance.activeAlarmOccurrences;
+        _activeAlarms = activeAlarms ?? ReminderAlarmService.instance.activeAlarmOccurrences,
+        _profileOf = profile ?? MemoryRepository().profile,
+        _helpAsked = helpAsked ??
+            (() async => await SettingsRepository().getValue(helpAskedKey) == 'true'),
+        _markHelpAsked = markHelpAsked ?? (() => SettingsRepository().setValue(helpAskedKey, 'true'));
+
+  /// Settings key: naitanong na ba ang "Kapag stressed ka, ano'ng nakakatulong?"
+  /// (Binubura ng "Burahin lahat".)
+  static const helpAskedKey = 'companion_help_asked';
 
   /// true = gumagana ang chat (keywords) kahit walang naka-download na model.
   static const enabled = true;
@@ -147,6 +170,20 @@ class ChatPreviewBrain {
   /// Default: ReminderAlarmService. Sa test: pwedeng ipasa.
   final Future<Map<int, DateTime>> Function() _activeAlarms;
 
+  /// Level 3: nickname, style, stress help, wins, routines. Default: MemoryRepository.
+  final Future<CompanionProfile> Function() _profileOf;
+
+  /// Naitanong na ba ang stress help? Default: settings.
+  final Future<bool> Function() _helpAsked;
+  final Future<void> Function() _markHelpAsked;
+
+  /// Ang alam ni Zoe tungkol sa user (kinukuha isang beses kada reply).
+  CompanionProfile _profile = CompanionProfile.empty;
+
+  /// Ilang beses nang down ang user sa session na ito (para sa winCheer,
+  /// tuwing ika-3 lang — hindi sa bawat mensahe).
+  int _downReplies = 0;
+
   /// "ano na-miss ko?" = ilang araw pabalik (kasama ngayon).
   static const missedDays = 7;
 
@@ -164,6 +201,21 @@ class ChatPreviewBrain {
   /// Linya ni Zoe mula sa ZoeLines, ayon sa language at mood ni Zoe.
   String _say(ZoeSituation s, [Map<String, String> vars = const {}]) =>
       ZoeLines.pickFor(_lang, s, _mood, vars);
+
+  /// Linya ni Zoe ayon sa Level 3 (nickname + diretso / malambing).
+  String _sayFor(CompanionSituation s, {TalkStyle? style, Map<String, String> vars = const {}}) =>
+      CompanionLines.pick(_lang, s,
+          style: style ?? _profile.style, name: _profile.nickname, vars: vars);
+
+  /// Level 3 profile. Kapag pumalya (o OFF ang long-term memory) → walang alam.
+  Future<CompanionProfile> _profileSafe() async {
+    try {
+      if (!await _memoryOnSafe()) return CompanionProfile.empty;
+      return await _profileOf();
+    } catch (_) {
+      return CompanionProfile.empty;
+    }
+  }
 
   /// Ano ang nararamdaman ng user sa mensaheng ito? (Tingnan ang [ChatRouter.toneOf].)
   static UserTone toneOf(String text) => ChatRouter.toneOf(text);
@@ -188,6 +240,10 @@ class ChatPreviewBrain {
 
     if (lower == 'test error') throw StateError('UI preview error');
 
+    // Level 3: ano'ng alam ni Zoe tungkol sa user + ang mga linya niya.
+    _profile = await _profileSafe();
+    await CompanionLines.ensureLoaded();
+
     // Saan pupunta ang mensahe — iisang patakaran (ChatRouter, pure).
     final route = ChatRouter.of(text);
     final tone = route.tone;
@@ -196,8 +252,11 @@ class ChatPreviewBrain {
     // Ang mensahe ay hindi sine-save dito; ang mood ni Zoe ang nagbabago.
     // Mood log (7 araw): +1 sa bilang ng tone ngayong araw (hindi ang mensahe).
     // OFF sa Settings → walang binibilang. Neutral → wala.
-    if (tone != UserTone.neutral) _logTone(tone);
-    final event = ToneDetector.toMoodEvent(tone);
+    // Level 3: "kapag stressed ako, makinig ka muna" ay kagustuhan, hindi
+    // nararamdaman ngayon → hindi binibilang, hindi nagbabago ang mood.
+    final aboutMe = route.route == ZoeRoute.memory;
+    if (tone != UserTone.neutral && !aboutMe) _logTone(tone);
+    final event = aboutMe ? null : ToneDetector.toMoodEvent(tone);
     if (event != null) {
       _report(event);
       // Ang SAGOT na ito ay ayon na sa bagong mood (hindi na hinihintay ang controller).
@@ -209,7 +268,8 @@ class ChatPreviewBrain {
     if (math != null) return [TextEntry(fromZoe: true, text: math)];
 
     // Pagod / stressed pero may utos → "Sige, isa-isa lang tayo." bago ang sagot.
-    List<ChatEntry> gently(List<ChatEntry> answer) => tone.isDown
+    // Diretso (Level 3) → walang dagdag na linya, card agad.
+    List<ChatEntry> gently(List<ChatEntry> answer) => tone.isDown && !aboutMe && !_profile.isDiretso
         ? [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...answer]
         : answer;
 
@@ -235,13 +295,38 @@ class ChatPreviewBrain {
       // "pagod na ako", "hi zoe, stressed ako" → script para sa nararamdaman.
       case ZoeRoute.feeling:
         final feeling = ZoeLines.situationForTone(tone)!;
-        final reply = TextEntry(fromZoe: true, text: _say(feeling));
+        final help = _profile.stressHelp;
+        // Level 3: down + alam ang gusto niya (makinig / payo / pampagaan) →
+        // iyon ang sagot. Kung hindi pa alam → karaniwang script.
+        final reply = TextEntry(
+          fromZoe: true,
+          text: tone.isDown && help != null
+              ? _sayFor(CompanionLines.downFor(help))
+              : _say(feeling),
+        );
+        final extra = <ChatEntry>[];
+        if (tone.isDown) {
+          // Paalala ng isang panalo (tuwing ika-3 down na sagot lang).
+          final win = _profile.wins.isEmpty ? null : _profile.wins[_downReplies % _profile.wins.length];
+          if (help != null && win != null && _downReplies % 3 == 0) {
+            extra.add(TextEntry(
+              fromZoe: true,
+              text: _sayFor(CompanionSituation.winCheer, vars: {'win': win}),
+            ));
+          }
+          _downReplies++;
+          // Isang beses lang: "Kapag stressed ka, ano'ng nakakatulong?"
+          if (help == null) {
+            final ask = await _helpQuestion();
+            if (ask != null) extra.add(ask);
+          }
+        }
         // Level 2: ilang araw nang ganito? (isang beses lang kada araw)
         final week = await _weekLine(tone);
-        if (week == null) return [reply];
+        if (week == null) return [reply, ...extra];
         // Pagod / stressed: "Mukhang busy ang linggo mo…" muna, saka ang script.
         // Masaya: ang script muna, saka "Ang dami mong good days…".
-        return tone.isDown ? [week, reply] : [reply, week];
+        return tone.isDown ? [week, reply, ...extra] : [reply, week, ...extra];
 
       default:
         return gently(await _answer(route.intent, text, lower));
@@ -319,6 +404,10 @@ class ChatPreviewBrain {
         // "busy ba ako bukas?" → bukas ang titingnan, hindi today.
         return [await _scheduleOn(_day(lower) ?? _today0)];
       case ZoeIntent.greeting:
+        // Level 3: may nickname at normal ang mood → "Hi, AC! …"
+        if (_profile.nickname != null && _mood == MoodState.content) {
+          return [TextEntry(fromZoe: true, text: _sayFor(CompanionSituation.greet))];
+        }
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.greeting))];
       case ZoeIntent.unknown:
         return [
@@ -394,6 +483,61 @@ class ChatPreviewBrain {
     return _t("Okay, I won't save anything. 👍", 'Sige, wala akong ise-save. 👍');
   }
 
+  // ───────────────────────── Level 3 Companion memory ─────────────────────────
+
+  /// "Kapag stressed ka, ano'ng nakakatulong?" + chips — isang beses lang
+  /// (kahit "✖ Huwag na" ang sagot). null = naitanong na / OFF ang memory.
+  Future<ClarifyEntry?> _helpQuestion() async {
+    try {
+      if (!await _memoryOnSafe() || await _helpAsked()) return null;
+      await _markHelpAsked();
+    } catch (_) {
+      return null; // pumalya ang settings → huwag nang magtanong
+    }
+    return ClarifyEntry(
+      question: _sayFor(CompanionSituation.helpAsk),
+      asksHelp: true,
+      chips: [
+        ClarifyChip.help(_t('🎧 Listen', '🎧 Makinig'), StressHelp.listen.value),
+        ClarifyChip.help(_t('💡 Advice', '💡 Payo'), StressHelp.advice.value),
+        ClarifyChip.help(_t('😄 Cheer me up', '😄 Pampagaan'), StressHelp.lighten.value),
+        ClarifyChip.skip(_t('✖ Never mind', '✖ Huwag na')),
+      ],
+    );
+  }
+
+  /// Linya pagkatapos ma-save ang memory (Accept o chip), ayon sa uri.
+  /// Nickname → "{name} na ang itatawag ko sa'yo." (ang BAGONG nickname).
+  Future<String> savedLine(FactRead fact, ZoeLanguage lang) async {
+    _lang = lang;
+    _profile = await _profileSafe();
+    await CompanionLines.ensureLoaded();
+    switch (fact.kind) {
+      case FactKind.nickname:
+        return CompanionLines.pick(lang, CompanionSituation.nickSaved,
+            style: _profile.style, name: fact.value);
+      case FactKind.style:
+        return _sayFor(CompanionSituation.styleSaved, style: TalkStyle.fromValue(fact.value));
+      case FactKind.stressHelp:
+        final help = StressHelp.fromValue(fact.value);
+        return _sayFor(help == null ? CompanionSituation.factSaved : CompanionLines.savedFor(help));
+      case FactKind.win:
+        return _sayFor(CompanionSituation.winSaved);
+      case FactKind.routine:
+        return _sayFor(CompanionSituation.routineSaved);
+      case FactKind.general:
+        return _sayFor(CompanionSituation.factSaved);
+    }
+  }
+
+  /// "✖ Huwag na" sa stress-help na tanong.
+  Future<String> helpSkipLine(ZoeLanguage lang) async {
+    _lang = lang;
+    _profile = await _profileSafe();
+    await CompanionLines.ensureLoaded();
+    return _sayFor(CompanionSituation.helpSkip);
+  }
+
   // ───────────────────────── Writes (cards) ─────────────────────────
 
   ChatEntry _reminder(String text, String lower) {
@@ -452,7 +596,12 @@ class ChatPreviewBrain {
 
   /// Memory card. OFF ang long-term memory → paliwanag + note card na lang.
   Future<List<ChatEntry>> _memory(String text) async {
-    final content = MemoryRules.extract(TextNormalizer.normalize(text, forDisplay: true));
+    final display = TextNormalizer.normalize(text, forDisplay: true);
+    // Level 3: nickname / style / stress help → malinaw na salita sa card
+    // ("Tawagin akong AC"). Iba pa → ang sinabi ng user.
+    final fact = CompanionFacts.read(display);
+    final content = CompanionFacts.cardText(fact, tagalog: _lang != ZoeLanguage.english) ??
+        MemoryRules.extract(display);
     if (content.isEmpty) return [_note(text)];
     if (!await _memoryOnSafe()) {
       return [

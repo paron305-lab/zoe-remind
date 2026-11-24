@@ -4,6 +4,7 @@ import 'package:zoe_remind/ai/parser/text_normalizer.dart';
 import 'package:zoe_remind/features/companion/controllers/tone_detector.dart';
 import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
+import 'package:zoe_remind/memory/companion_facts.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
 
 /// Saan pupunta ang mensahe (pagkatapos ng CrisisGuard at math).
@@ -70,6 +71,7 @@ class ChatRoute {
 ///
 ///   1. stopAlarm   "patayin mo ang alarm"
 ///   2. thanks      walang ibang intent + "salamat / thank"
+///   2b. memory     Level 3: nickname / style / stress help / (tandaan +) win, routine
 ///   3. memory      "tandaan mo / remember / call me…" + tungkol sa iyo, walang oras
 ///                  (may "remind" din → askKind na may 💜 Tandaan)
 ///   4. feeling     nararamdaman + walang utos (o bati lang, o pahayag na
@@ -108,6 +110,16 @@ class ChatRouter {
 
     final match = IntentRules.matchFull(lower);
     final intent = match.intent;
+
+    // Level 3 Companion memory (bago ang thanks / feeling / intent):
+    //   "call me AC", "diretsuhin mo lang ako", "be gentle with me",
+    //   "kapag stressed ako, makinig ka muna" → memory card (kahit walang "tandaan").
+    //   "tandaan mo, nakapasa ako…" / "remember, I gym every MWF" → memory card.
+    // Tanong ("do you remember that I passed?") → hindi win / routine.
+    final trigger = !IntentRules.isQuestion(lower) && MemoryRules.hasTrigger(lower);
+    if (CompanionFacts.isStatement(lower, hasTrigger: trigger)) {
+      return ChatRoute(ZoeRoute.memory, intent, tone);
+    }
 
     if (intent == ZoeIntent.unknown && (lower.contains('salamat') || lower.contains('thank'))) {
       return ChatRoute(ZoeRoute.thanks, intent, tone);

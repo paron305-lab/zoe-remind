@@ -21,6 +21,7 @@ import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 import 'package:zoe_remind/features/companion/models/mood_state.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/memory/companion_facts.dart';
 import 'package:zoe_remind/memory/habit_rules.dart';
 import 'package:zoe_remind/memory/habit_watcher.dart';
 
@@ -193,7 +194,8 @@ class ZoeChatController extends ChangeNotifier {
     }
     if (ContextReplies.isYes(text)) {
       final saved = await accept(card);
-      if (saved) {
+      // Memory: may sariling linya na si Zoe pagkatapos ng accept (Level 3).
+      if (saved && card.kind != DraftKind.memory) {
         entries.add(TextEntry(fromZoe: true, text: t('Done — saved! ✓', 'Ayan, na-save na! ✓')));
         _notify();
       }
@@ -295,6 +297,28 @@ class ZoeChatController extends ChangeNotifier {
     // note ang mensaheng tungkol sa pananakit sa sarili → crisis reply.
     if (CrisisGuard.matches(text)) return null;
 
+    // Level 3: "Kapag stressed ka, ano'ng nakakatulong?" → "makinig ka lang" / "wag na".
+    if (c.asksHelp) {
+      final help = CompanionFacts.helpChoice(ContextReplies.clean(text));
+      if (help != null) {
+        try {
+          return await _saveHelp(help);
+        } catch (e) {
+          debugPrint('Zoe chat: saving stress help failed: $e');
+          return [
+            TextEntry(
+              fromZoe: true,
+              text: t("I couldn't save that. Please try again.", 'Hindi ko na-save. Pakisubukan ulit.'),
+            ),
+          ];
+        }
+      }
+      if (ContextReplies.isCancel(text)) {
+        return [TextEntry(fromZoe: true, text: await _brain.helpSkipLine(language))];
+      }
+      return null; // ibang mensahe → normal na reply
+    }
+
     // "Reminder ba 'to, task, o note?" → "task" / "reminder na lang" / "wag na".
     if (c.asksKind) {
       final kind = ContextReplies.kindFromText(text);
@@ -326,6 +350,7 @@ class ZoeChatController extends ChangeNotifier {
 
   /// Pinindot ang chip ng uri ([⏰ Reminder] [✅ Task] [📝 Note] [💜 Tandaan] [✖ Wala]).
   Future<void> pickKind(ClarifyEntry c, ClarifyChip chip) async {
+    if (c.asksHelp) return pickHelp(c, chip);
     if (c.answered || !c.asksKind || chip.isTime) return;
     c.answered = true;
     entries.add(TextEntry(fromZoe: false, text: chip.label));
@@ -349,6 +374,49 @@ class ZoeChatController extends ChangeNotifier {
       ];
     }
     await _zoeSays(next);
+  }
+
+  /// Level 3: pinindot ang [🎧 Makinig] [💡 Payo] [😄 Pampagaan] [✖ Huwag na].
+  /// Ang pagpindot mismo ang pagkumpirma ng user → nase-save agad.
+  Future<void> pickHelp(ClarifyEntry c, ClarifyChip chip) async {
+    if (c.answered || !c.asksHelp) return;
+    c.answered = true;
+    entries.add(TextEntry(fromZoe: false, text: chip.label));
+    _notify();
+    unawaited(_save('user', chip.label));
+    final help = StressHelp.fromValue(chip.help);
+    List<ChatEntry> next;
+    try {
+      next = chip.skip || help == null
+          ? [TextEntry(fromZoe: true, text: await _brain.helpSkipLine(language))]
+          : await _saveHelp(help);
+    } catch (e) {
+      debugPrint('Zoe chat: saving stress help failed: $e');
+      next = [
+        TextEntry(
+          fromZoe: true,
+          text: t("I couldn't save that. Please try again.", 'Hindi ko na-save. Pakisubukan ulit.'),
+        ),
+      ];
+    }
+    await _zoeSays(next);
+  }
+
+  /// I-save ang stress help (isa lang — napapalitan ang luma) + linya ni Zoe.
+  Future<List<ChatEntry>> _saveHelp(StressHelp help) async {
+    final fact = FactRead(FactKind.stressHelp, help.value);
+    final content = CompanionFacts.cardText(fact, tagalog: language != ZoeLanguage.english)!;
+    final id = await _memories.add(content, source: 'user', kind: fact.kind, value: fact.value);
+    if (id == null) {
+      return [
+        TextEntry(
+          fromZoe: true,
+          text: t('Long-term memory is off. Turn it on in Settings › Privacy & Memory.',
+              'Naka-OFF ang long-term memory. I-ON mo sa Settings › Privacy & Memory.'),
+        ),
+      ];
+    }
+    return [TextEntry(fromZoe: true, text: await _brain.savedLine(fact, language))];
   }
 
   /// Pinindot ang chip (8 AM / 12 PM / 7 PM o napili sa time picker).
@@ -432,9 +500,13 @@ class ZoeChatController extends ChangeNotifier {
         case DraftKind.memory:
           // 'user' = sinabi mo mismo. 'chat' = mungkahi ni Zoe na in-Accept mo (B6).
           // null = OFF ang long-term memory.
+          // Level 3: anong klase (nickname / style / stress help / win / routine).
+          final fact = CompanionFacts.read(e.memory!.content);
           final id = await _memories.add(
             e.memory!.content,
             source: e.memory!.isSuggestion ? 'chat' : 'user',
+            kind: fact.kind,
+            value: fact.value,
           );
           if (id == null) {
             e.status = DraftStatus.pending;
@@ -453,6 +525,8 @@ class ZoeChatController extends ChangeNotifier {
       await _save('zoe', _savedLine(e));
       // B6: bagong reminder → may napansing ugali ba? (mungkahi lang, may card)
       if (e.kind == DraftKind.reminder) unawaited(_offerHabit());
+      // Level 3: "AC na ang itatawag ko sa'yo." / "Short and direct from now on."
+      if (e.kind == DraftKind.memory) unawaited(_afterMemory(e.memory!.content));
       return true;
     } catch (err) {
       debugPrint('Zoe chat: saving card failed: $err');
@@ -464,6 +538,17 @@ class ZoeChatController extends ChangeNotifier {
       ));
       _notify();
       return false;
+    }
+  }
+
+  /// Linya ni Zoe pagkatapos ma-save ang memory (ayon sa uri).
+  Future<void> _afterMemory(String content) async {
+    try {
+      final line = await _brain.savedLine(CompanionFacts.read(content), language);
+      if (_disposed) return;
+      await _zoeSays([TextEntry(fromZoe: true, text: line)]);
+    } catch (err) {
+      debugPrint('Zoe chat: memory line failed: $err');
     }
   }
 
