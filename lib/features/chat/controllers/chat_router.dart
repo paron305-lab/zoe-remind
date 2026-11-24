@@ -1,5 +1,6 @@
 import 'package:zoe_remind/ai/parser/intent_classifier.dart';
 import 'package:zoe_remind/ai/parser/intent_rules.dart';
+import 'package:zoe_remind/ai/parser/small_talk.dart';
 import 'package:zoe_remind/ai/parser/text_normalizer.dart';
 import 'package:zoe_remind/features/companion/controllers/tone_detector.dart';
 import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
@@ -41,7 +42,7 @@ enum ZoeRoute {
   /// "ano na-miss ko?"
   missed,
 
-  /// "hi", "gm", "kumusta"
+  /// "hi", "gm", "kumusta", "wassup", "sino ka?", "good night" (tingnan ang [ChatRoute.talk])
   greeting,
 
   /// Walang tumamang rule → IntentRules.isFeeling (malasakit) o si Qwen.
@@ -50,7 +51,7 @@ enum ZoeRoute {
 
 /// Desisyon ng router para sa isang mensahe.
 class ChatRoute {
-  const ChatRoute(this.route, this.intent, this.tone, {this.memoryChip = false});
+  const ChatRoute(this.route, this.intent, this.tone, {this.memoryChip = false, this.talk});
 
   final ZoeRoute route;
 
@@ -63,8 +64,12 @@ class ChatRoute {
   /// [ZoeRoute.askKind]: may 💜 Tandaan chip ba?
   final bool memoryChip;
 
+  /// [ZoeRoute.greeting]: anong klaseng small talk ("kumusta ka?" → howAreYou).
+  /// null = karaniwang bati galing sa IntentRules.
+  final SmallTalk? talk;
+
   @override
-  String toString() => 'ChatRoute($route, $intent, $tone, memoryChip: $memoryChip)';
+  String toString() => 'ChatRoute($route, $intent, $tone, memoryChip: $memoryChip, talk: $talk)';
 }
 
 /// Ang pagkakasunod ng desisyon ng Zoe Chat — PURE (walang database, walang model).
@@ -72,6 +77,8 @@ class ChatRoute {
 ///   1. stopAlarm   "patayin mo ang alarm"
 ///   2. thanks      walang ibang intent + "salamat / thank"
 ///   2b. memory     Level 3: nickname / style / stress help / (tandaan +) win, routine
+///   2c. greeting   small talk LANG ang buong mensahe ("wassup", "kumusta ka?",
+///                  "sino ka?", "good night", "bye") — may iba pa → tuloy sa baba
 ///   3. memory      "tandaan mo / remember / call me…" + tungkol sa iyo, walang oras
 ///                  (may "remind" din → askKind na may 💜 Tandaan)
 ///   4. feeling     nararamdaman + walang utos (o bati lang, o pahayag na
@@ -123,6 +130,13 @@ class ChatRouter {
 
     if (intent == ZoeIntent.unknown && (lower.contains('salamat') || lower.contains('thank'))) {
       return ChatRoute(ZoeRoute.thanks, intent, tone);
+    }
+
+    // Small talk: "wassup zoe", "kumusta ka?", "tao ka ba?", "good night".
+    // Buong mensahe lang — "hi zoe, ano gagawin ko?" ay hindi small talk.
+    final talk = SmallTalkRules.read(lower);
+    if (talk != null) {
+      return ChatRoute(ZoeRoute.greeting, ZoeIntent.greeting, tone, talk: talk);
     }
 
     // Memory bago ang intent: ang "reminders" sa "gusto ko ng morning reminders"

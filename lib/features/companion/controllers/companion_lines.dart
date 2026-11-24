@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:zoe_remind/ai/parser/small_talk.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/memory/companion_facts.dart';
 
@@ -43,12 +44,42 @@ enum CompanionSituation {
 
   /// Paalala ng isang panalo kapag down. {win}
   winCheer,
+
+  // ── Small talk (SmallTalkRules) ──
+  /// "kumusta ka?" → "Okay naman ako! Ikaw, kumusta?"
+  talkHowAreYou,
+
+  /// "ano ginagawa mo?"
+  talkWhatDoing,
+
+  /// "sino ka?" → "Ako si Zoe, ang AI assistant mo…"
+  talkWhoAreYou,
+
+  /// "tao ka ba?" → tapat: AI si Zoe.
+  talkAreYouAi,
+  talkGoodNight,
+  talkBye,
+
+  /// "ang galing mo"
+  talkCompliment,
+
+  /// "love you zoe" → mainit, hindi romantic, hindi exclusive.
+  talkAffection,
+
+  /// "bored ako" → maliit na mungkahi.
+  talkBored,
+
+  /// "kumain ka na?" → "Hindi ako kumakain — AI ako 😄 Ikaw, kumain ka na?"
+  talkEaten,
+
+  /// "kwentuhan tayo", "spill the tea" → "Sige! Ano'ng nasa isip mo?"
+  talkLetsChat,
 }
 
 /// Level 3 — ang boses ni Zoe na ayon sa user: nickname, diretso / malambing,
 /// at kung ano'ng nakakatulong kapag stressed siya.
 ///
-/// Galing ang mga linya sa `assets/prompts/companion_lines.json` (~5,500 linya,
+/// Galing ang mga linya sa `assets/prompts/companion_lines.json` (~7,650 linya,
 /// EN / Tagalog / Taglish × default / diretso / malambing). Ginagawa ito ng
 /// `python3 tool/companion/gen_companion_lines.py` — doon mag-edit, hindi sa JSON.
 ///
@@ -164,6 +195,22 @@ class CompanionLines {
         StressHelp.lighten => CompanionSituation.downLighten,
       };
 
+  /// Linya para sa small talk. [SmallTalk.hello] → null (karaniwang bati ang gamit).
+  static CompanionSituation? talkFor(SmallTalk talk) => switch (talk) {
+        SmallTalk.hello => null,
+        SmallTalk.howAreYou => CompanionSituation.talkHowAreYou,
+        SmallTalk.whatDoing => CompanionSituation.talkWhatDoing,
+        SmallTalk.whoAreYou => CompanionSituation.talkWhoAreYou,
+        SmallTalk.areYouAi => CompanionSituation.talkAreYouAi,
+        SmallTalk.goodNight => CompanionSituation.talkGoodNight,
+        SmallTalk.bye => CompanionSituation.talkBye,
+        SmallTalk.compliment => CompanionSituation.talkCompliment,
+        SmallTalk.affection => CompanionSituation.talkAffection,
+        SmallTalk.bored => CompanionSituation.talkBored,
+        SmallTalk.haveYouEaten => CompanionSituation.talkEaten,
+        SmallTalk.letsChat => CompanionSituation.talkLetsChat,
+      };
+
   /// Kapag walang asset (hal. sa unit test na walang JSON). Walang {name}.
   static String _fallback(ZoeLanguage lang, CompanionSituation s) {
     final en = lang == ZoeLanguage.english;
@@ -186,6 +233,23 @@ class CompanionLines {
       CompanionSituation.routineSaved => en ? 'Got your routine.' : 'Noted ang routine mo.',
       CompanionSituation.factSaved => en ? "I'll remember that." : "Tatandaan ko 'yan.",
       CompanionSituation.winCheer => en ? "You've done hard things before." : 'Nakaya mo na dati, kaya mo ulit.',
+      CompanionSituation.talkHowAreYou => en ? "I'm good! How about you?" : 'Okay naman ako! Ikaw, kumusta?',
+      CompanionSituation.talkWhatDoing =>
+        en ? 'Just keeping an eye on your reminders. You?' : 'Binabantayan ko lang ang mga paalala mo. Ikaw?',
+      CompanionSituation.talkWhoAreYou => en
+          ? "I'm Zoe, your AI assistant for reminders, tasks and notes."
+          : 'Ako si Zoe, ang AI assistant mo para sa paalala, gawain at notes.',
+      CompanionSituation.talkAreYouAi =>
+        en ? "I'm an AI — but I'm really here to help." : "AI ako, pero totoo 'yung sinasabi kong kaya mo 'to.",
+      CompanionSituation.talkGoodNight => en ? 'Good night! Rest well.' : 'Good night! Magpahinga ka nang maayos.',
+      CompanionSituation.talkBye => en ? "Bye! I'm here whenever you need me." : 'Bye! Nandito lang ako kapag kailangan mo ako.',
+      CompanionSituation.talkCompliment => en ? 'Thank you! We make a good team.' : 'Salamat! Magandang team tayo.',
+      CompanionSituation.talkAffection => en ? "Aww, thank you! I'm glad I can help." : 'Ay, salamat! Masaya akong natutulungan kita.',
+      CompanionSituation.talkBored =>
+        en ? 'Bored? Want to check your list for one small thing?' : 'Bored? Gusto mo tingnan ang listahan mo para sa isang maliit na gawain?',
+      CompanionSituation.talkEaten =>
+        en ? "I don't eat — I'm an AI. Have you eaten?" : 'Hindi ako kumakain — AI ako. Ikaw, kumain ka na?',
+      CompanionSituation.talkLetsChat => en ? "Sure! What's on your mind?" : "Sige! Ano'ng nasa isip mo?",
     };
   }
 }

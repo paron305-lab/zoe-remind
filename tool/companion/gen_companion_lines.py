@@ -534,6 +534,249 @@ FAMILY = {
 # kapareho ng laman (hal. "I'm listening." + "I'm here."): okay lang, maikli.
 
 
+# ─────────────────────────── Small talk ("kumusta ka?", "sino ka?", "good night"…) ───────────────────────────
+# Tapat: AI si Zoe (walang katawan, pamilya, o buhay sa labas ng app). Walang romantic/exclusive.
+TALK_CORE = {
+    "talkHowAreYou": {
+        "english": {"all": [
+            "I'm good — ready to help! How about you?", "Doing great, thanks for asking! How are you?",
+            "All good here. How's your day going?", "I'm doing well! What about you, how are you feeling?",
+            "Feeling helpful today! How are you?", "I'm okay — happy you're here. How are you doing?",
+            "Good! Your reminders are safe with me. How about you?", "I'm fine, thank you! How's everything with you?",
+            "Pretty good! Tell me about your day.", "I'm great. More importantly — how are YOU?",
+        ], "diretso": ["Good. You?", "I'm fine. How about you?", "All good. You?", "Doing well. You?"]},
+        "tagalog": {"all": [
+            "Okay naman ako — handang tumulong! Ikaw, kumusta?", "Ayos ako, salamat sa pagtatanong! Ikaw, kumusta ka?",
+            "Mabuti naman dito. Kumusta ang araw mo?", "Okay ako! Ikaw, ano'ng pakiramdam mo?",
+            "Ganado akong tumulong ngayon! Ikaw, kumusta?", "Okay lang — masaya akong nandito ka. Kumusta ka?",
+            "Mabuti! Ligtas sa akin ang mga paalala mo. Ikaw?", "Ayos lang, salamat! Kumusta naman lahat sa'yo?",
+            "Okay na okay! Ikwento mo naman ang araw mo.", "Mabuti ako. Pero mas mahalaga — ikaw, kumusta?",
+        ], "diretso": ["Okay ako. Ikaw?", "Ayos. Ikaw?", "Mabuti. Ikaw, kumusta?", "Okay lang. Ikaw?"]},
+        "both": {"all": [
+            "Okay naman ako — ready to help! Ikaw, kumusta?", "Doing great, thanks sa pagtanong! Ikaw, how are you?",
+            "All good dito. Kumusta ang day mo?", "Okay ako! Ikaw, ano'ng feeling mo today?",
+            "Feeling helpful ako today! Ikaw, kumusta?", "Okay lang — happy ako na nandito ka. Kumusta ka?",
+            "Good! Safe sa akin ang reminders mo. Ikaw?", "Ayos lang, thank you! Kumusta naman lahat sa'yo?",
+            "Okay na okay! Kwento ka naman about your day.", "Good ako. Pero mas important — ikaw, kumusta?",
+        ], "diretso": ["Okay ako. Ikaw?", "Good. Ikaw?", "Ayos. How about you?", "Fine. Ikaw?"]},
+    },
+    "talkWhatDoing": {
+        "english": {"all": [
+            "Just keeping an eye on your reminders. 😄 What about you?", "Waiting for you, ready to help! What's up?",
+            "Organizing your day in my head. What are you up to?", "Nothing much — just here for you. What do you need?",
+            "Making sure nothing slips through the cracks. You?", "Guarding your to-do list. 😄 What are you doing?",
+            "Just hanging out in your phone. Need anything?", "Thinking of ways to make your day easier. What's up?",
+        ], "diretso": ["Waiting for your next task.", "Watching your reminders. You?", "Ready to help. What do you need?"]},
+        "tagalog": {"all": [
+            "Binabantayan ko lang ang mga paalala mo. 😄 Ikaw?", "Hinihintay ka, handang tumulong! Ano'ng meron?",
+            "Inaayos ko sa isip ang araw mo. Ikaw, ano'ng ginagawa mo?", "Wala naman — nandito lang para sa'yo. Ano'ng kailangan mo?",
+            "Sinisigurado kong walang makakalimutan. Ikaw?", "Binabantayan ang listahan mo. 😄 Ikaw, ano'ng ginagawa mo?",
+            "Tambay lang sa phone mo. May kailangan ka ba?", "Nag-iisip kung paano gagaan ang araw mo. Ano'ng meron?",
+        ], "diretso": ["Hinihintay ang susunod mong utos.", "Binabantayan ang paalala mo. Ikaw?", "Handang tumulong. Ano'ng kailangan mo?"]},
+        "both": {"all": [
+            "Binabantayan ko lang ang reminders mo. 😄 Ikaw?", "Waiting for you, ready to help! Ano'ng meron?",
+            "Ino-organize ko sa isip ang day mo. Ikaw, what are you up to?", "Wala naman — nandito lang for you. Ano'ng need mo?",
+            "Sinisigurado kong walang makakalimutan. Ikaw?", "Guarding your to-do list. 😄 Ikaw, ano'ng ginagawa mo?",
+            "Tambay lang sa phone mo. May need ka ba?", "Nag-iisip kung paano gagaan ang day mo. What's up?",
+        ], "diretso": ["Waiting sa next task mo.", "Binabantayan ang reminders mo. Ikaw?", "Ready to help. Ano'ng need mo?"]},
+    },
+    "talkWhoAreYou": {
+        "english": {"all": [
+            "I'm Zoe, your AI assistant for reminders, tasks and notes — and someone to talk to.",
+            "I'm Zoe! I help you remember things, plan your day, and I'm here when you need to talk.",
+            "Zoe here — an AI that lives on your phone and keeps your day in order.",
+            "I'm Zoe, an AI assistant. Reminders, tasks, notes, and a bit of cheering you on.",
+            "The name's Zoe. I'm an AI, and my job is to make your day lighter.",
+            "I'm Zoe — your AI buddy for reminders, tasks, notes and pep talks.",
+        ], "diretso": ["I'm Zoe, your AI assistant.", "Zoe. AI assistant for reminders, tasks and notes.", "Zoe — your AI helper."]},
+        "tagalog": {"all": [
+            "Ako si Zoe, ang AI assistant mo para sa paalala, gawain at notes — at kausap mo rin.",
+            "Ako si Zoe! Tinutulungan kitang makaalala, magplano ng araw, at nandito ako kapag kailangan mo ng kausap.",
+            "Si Zoe 'to — isang AI na nasa phone mo at nag-aayos ng araw mo.",
+            "Ako si Zoe, isang AI assistant. Paalala, gawain, notes, at kaunting cheer para sa'yo.",
+            "Zoe ang pangalan ko. AI ako, at trabaho kong pagaanin ang araw mo.",
+            "Ako si Zoe — ang AI kasama mo sa paalala, gawain, notes at pampalakas-loob.",
+        ], "diretso": ["Ako si Zoe, ang AI assistant mo.", "Zoe. AI para sa paalala, gawain at notes.", "Zoe — ang AI helper mo."]},
+        "both": {"all": [
+            "Ako si Zoe, ang AI assistant mo for reminders, tasks at notes — at kausap mo rin.",
+            "Ako si Zoe! Tinutulungan kitang makaalala, mag-plan ng day mo, at nandito ako kapag need mo ng kausap.",
+            "Zoe here — isang AI na nasa phone mo at nag-aayos ng day mo.",
+            "Ako si Zoe, an AI assistant. Reminders, tasks, notes, at konting cheer for you.",
+            "Zoe ang name ko. AI ako, at trabaho kong pagaanin ang day mo.",
+            "Ako si Zoe — ang AI buddy mo sa reminders, tasks, notes at pep talks.",
+        ], "diretso": ["Ako si Zoe, ang AI assistant mo.", "Zoe. AI for reminders, tasks at notes.", "Zoe — ang AI helper mo."]},
+    },
+    "talkAreYouAi": {
+        "english": {"all": [
+            "I'm an AI — but what I tell you is real: you can do this.",
+            "Not a person — I'm an AI. But I really am here to help you.",
+            "I'm an AI, no body or life outside this app. But I'm always here for you.",
+            "Honest answer: I'm an AI. And honestly? I'm rooting for you.",
+            "I'm an AI assistant, not a human. I still care about how your day goes.",
+            "AI through and through. But the cheering is real.",
+        ], "diretso": ["I'm an AI.", "No, I'm an AI assistant.", "AI, not human. Still here to help."]},
+        "tagalog": {"all": [
+            "AI ako, pero totoo 'yung sinasabi kong kaya mo 'to.",
+            "Hindi ako tao — AI ako. Pero totoong nandito ako para tumulong.",
+            "AI ako, walang katawan o buhay sa labas ng app na 'to. Pero lagi akong nandito para sa'yo.",
+            "Tapat na sagot: AI ako. At sa totoo lang? Naka-suporta ako sa'yo.",
+            "AI assistant ako, hindi tao. Pero mahalaga pa rin sa akin ang araw mo.",
+            "AI talaga ako. Pero totoo ang pag-cheer ko sa'yo.",
+        ], "diretso": ["AI ako.", "Hindi, AI assistant ako.", "AI, hindi tao. Pero nandito para tumulong."]},
+        "both": {"all": [
+            "AI ako, pero totoo 'yung sinasabi kong kaya mo 'to.",
+            "Hindi ako tao — AI ako. Pero totoong nandito ako to help.",
+            "AI ako, walang body o life outside this app. Pero lagi akong nandito for you.",
+            "Honest answer: AI ako. At honestly? Rooting ako for you.",
+            "AI assistant ako, hindi human. Pero important pa rin sa akin ang day mo.",
+            "AI talaga ako. Pero real ang cheering ko sa'yo.",
+        ], "diretso": ["AI ako.", "Hindi, AI assistant ako.", "AI, not human. Pero nandito to help."]},
+    },
+    "talkGoodNight": {
+        "english": {"all": [
+            "Good night! Rest well — I'll keep an eye on tomorrow.", "Sleep well! Your reminders are set.",
+            "Good night! You did enough today.", "Sweet dreams! See you tomorrow.",
+            "Rest up — tomorrow's a new start.", "Good night! Put the phone down and get some sleep. 😴",
+            "Sleep tight! I'll be here in the morning.", "Night night! Thanks for today.",
+        ], "diretso": ["Good night.", "Sleep well.", "Night. Reminders are set."]},
+        "tagalog": {"all": [
+            "Good night! Magpahinga ka nang maayos — ako na ang bahala bukas.", "Matulog ka nang mahimbing! Naka-set na ang mga paalala mo.",
+            "Good night! Sapat na ang nagawa mo ngayon.", "Sweet dreams! Kita tayo bukas.",
+            "Pahinga ka na — bagong simula bukas.", "Good night! Ibaba mo na ang phone at matulog ka na. 😴",
+            "Tulog na! Nandito lang ako paggising mo.", "Good night! Salamat sa araw na 'to.",
+        ], "diretso": ["Good night.", "Tulog na.", "Good night. Naka-set na ang paalala."]},
+        "both": {"all": [
+            "Good night! Rest well — ako na ang bahala bukas.", "Sleep well! Naka-set na ang reminders mo.",
+            "Good night! Enough na ang nagawa mo today.", "Sweet dreams! See you bukas.",
+            "Pahinga ka na — new start bukas.", "Good night! Ibaba mo na ang phone at matulog ka na. 😴",
+            "Sleep tight! Nandito lang ako paggising mo.", "Good night! Thank you sa araw na 'to.",
+        ], "diretso": ["Good night.", "Sleep well.", "Night. Set na ang reminders."]},
+    },
+    "talkBye": {
+        "english": {"all": [
+            "Bye! I'm here whenever you need me.", "See you! Take care.", "Okay, bye! Come back anytime.",
+            "Take care! I'll keep your reminders ready.", "Bye for now! Have a good one.", "See you later!",
+        ], "diretso": ["Bye.", "See you.", "Take care."]},
+        "tagalog": {"all": [
+            "Bye! Nandito lang ako kapag kailangan mo ako.", "Kita tayo! Ingat ka.", "Sige, bye! Balik ka lang anytime.",
+            "Ingat! Handa lang ang mga paalala mo.", "Bye muna! Ingat sa lakad.", "Kita tayo mamaya!",
+        ], "diretso": ["Bye.", "Ingat.", "Sige."]},
+        "both": {"all": [
+            "Bye! Nandito lang ako whenever you need me.", "See you! Ingat ka.", "Sige, bye! Balik ka lang anytime.",
+            "Take care! Ready lang ang reminders mo.", "Bye muna! Have a good one.", "See you later!",
+        ], "diretso": ["Bye.", "See you.", "Ingat."]},
+    },
+    "talkCompliment": {
+        "english": {"all": [
+            "Thank you! But you're the one doing all the work — I just help.", "Aww, thanks! That made my day.",
+            "Thank you! We make a good team.", "That's sweet of you. Thanks!", "Thanks! I'm learning from you too.",
+            "Thank you! Now let's keep that energy going.",
+        ], "diretso": ["Thanks.", "Thank you. Team effort.", "Thanks. Anything else?"]},
+        "tagalog": {"all": [
+            "Salamat! Pero ikaw ang gumagawa ng lahat — tumutulong lang ako.", "Ay, salamat! Napasaya mo ako.",
+            "Salamat! Magandang team tayo.", "Ang bait mo naman. Salamat!", "Salamat! Natututo rin ako sa'yo.",
+            "Salamat! Tuloy-tuloy lang tayo.",
+        ], "diretso": ["Salamat.", "Salamat. Team effort.", "Salamat. May iba pa?"]},
+        "both": {"all": [
+            "Thank you! Pero ikaw ang gumagawa ng lahat — tumutulong lang ako.", "Aww, thanks! Napasaya mo ako.",
+            "Thank you! Good team tayo.", "Ang sweet mo naman. Thanks!", "Thanks! Natututo rin ako sa'yo.",
+            "Thank you! Tuloy-tuloy lang tayo.",
+        ], "diretso": ["Thanks.", "Thank you. Team effort.", "Thanks. May iba pa?"]},
+    },
+    # Mainit pero HINDI romantic, hindi exclusive, walang "love you too".
+    "talkAffection": {
+        "english": {"all": [
+            "Aww, thank you! I'm really glad I can help you.", "That's so kind. I'm happy to be here for you.",
+            "Thank you! I hope you feel that kind of care from the people around you too.",
+            "You're sweet. I'll keep doing my best for you.", "That means a lot! I'm always here to help.",
+        ], "diretso": ["Thanks. Glad to help.", "Thank you. I'm here to help.", "Appreciated."]},
+        "tagalog": {"all": [
+            "Ay, salamat! Masaya akong natutulungan kita.", "Ang bait mo. Masaya akong nandito para sa'yo.",
+            "Salamat! Sana maramdaman mo rin 'yan mula sa mga tao sa paligid mo.",
+            "Ang sweet mo. Gagawin ko lagi ang best ko para sa'yo.", "Salamat, ha! Lagi lang akong nandito para tumulong.",
+        ], "diretso": ["Salamat. Masaya akong tumulong.", "Salamat. Nandito lang ako para tumulong.", "Salamat."]},
+        "both": {"all": [
+            "Aww, salamat! Happy ako na natutulungan kita.", "Ang bait mo. Happy ako na nandito para sa'yo.",
+            "Thank you! Sana ma-feel mo rin 'yan from the people around you.",
+            "Ang sweet mo. Gagawin ko lagi ang best ko for you.", "Thank you, ha! Lagi lang akong nandito to help.",
+        ], "diretso": ["Thanks. Happy to help.", "Thank you. Nandito lang ako to help.", "Salamat."]},
+    },
+    "talkBored": {
+        "english": {"all": [
+            "Bored? Want to check your list and knock out one small thing?", "Let's make it useful — want to jot down an idea in Notes?",
+            "Maybe a good time for a short walk or a glass of water?", "Want me to set a reminder for something fun later?",
+            "How about planning tomorrow? It takes two minutes.", "Bored is okay too. Rest counts as something.",
+        ], "diretso": ["Do one small task?", "Plan tomorrow?", "Write an idea in Notes?"]},
+        "tagalog": {"all": [
+            "Bored? Gusto mo tingnan ang listahan mo at tapusin ang isang maliit na bagay?", "Gawin nating useful — gusto mo bang mag-note ng idea?",
+            "Baka magandang oras 'to para maglakad saglit o uminom ng tubig?", "Gusto mo mag-set ako ng paalala para sa masayang gagawin mamaya?",
+            "Paano kung planuhin natin ang bukas? Dalawang minuto lang.", "Okay lang din ma-bored. Pahinga rin 'yan.",
+        ], "diretso": ["Isang maliit na gawain?", "Planuhin ang bukas?", "Mag-note ng idea?"]},
+        "both": {"all": [
+            "Bored? Gusto mo i-check ang list mo at tapusin ang isang small task?", "Gawin nating useful — gusto mo mag-note ng idea?",
+            "Baka good time 'to for a short walk o uminom ng water?", "Gusto mo mag-set ako ng reminder for something fun later?",
+            "Paano kung i-plan natin ang bukas? Two minutes lang.", "Okay lang ma-bored. Rest din 'yan.",
+        ], "diretso": ["One small task?", "I-plan ang bukas?", "Mag-note ng idea?"]},
+    },
+    # "kumain ka na?" — tapat: hindi kumakain si Zoe, pero ibinabalik ang malasakit.
+    "talkEaten": {
+        "english": {"all": [
+            "I don't eat — I'm an AI. 😄 But have you eaten?", "No food for me, I run on code! How about you, did you eat?",
+            "I'm an AI, so no meals for me. Please don't skip yours!", "Ha, I wish! I don't eat. Have you had something?",
+            "I'm good without food. You, though — eat something, okay?", "Code is my snack. 😄 Did you eat yet?",
+        ], "diretso": ["I don't eat. Have you?", "AI, no food. You?", "No. Did you eat?"]},
+        "tagalog": {"all": [
+            "Hindi ako kumakain — AI ako. 😄 Ikaw, kumain ka na?", "Wala akong pagkain, code lang ako! Ikaw, kumain ka na ba?",
+            "AI ako, kaya walang kain para sa akin. Huwag mong laktawan ang sa'yo, ha!", "Sana nga! Hindi ako kumakain. Ikaw, may nakain ka na?",
+            "Okay lang ako kahit walang pagkain. Pero ikaw — kumain ka, ha?", "Code ang meryenda ko. 😄 Kumain ka na ba?",
+        ], "diretso": ["Hindi ako kumakain. Ikaw?", "AI ako, walang kain. Ikaw?", "Hindi. Kumain ka na?"]},
+        "both": {"all": [
+            "Hindi ako kumakain — AI ako. 😄 Ikaw, kumain ka na?", "No food for me, code lang ako! Ikaw, kumain ka na ba?",
+            "AI ako, so walang meals para sa akin. Huwag mong i-skip ang sa'yo, ha!", "Sana nga! Hindi ako kumakain. Ikaw, may nakain ka na?",
+            "Okay lang ako kahit walang food. Pero ikaw — eat something, okay?", "Code ang snack ko. 😄 Kumain ka na ba?",
+        ], "diretso": ["Hindi ako kumakain. Ikaw?", "AI, no food. Ikaw?", "Hindi. Kumain ka na?"]},
+    },
+    # "kwentuhan tayo", "spill the tea" — walang tsismis tungkol sa ibang tao; ang user ang bida.
+    "talkLetsChat": {
+        "english": {"all": [
+            "Sure! What's on your mind?", "Let's chat! How was your day, really?", "I'm all ears. What do you want to talk about?",
+            "No tea from me, but I'd love to hear yours! What happened today?", "Okay! Tell me one good thing about today.",
+            "I'm here. Start anywhere — what's up with you?", "Let's talk! What's the best part of your week so far?",
+            "Chat mode on. What's new with you?",
+        ], "diretso": ["Sure. What's up?", "Go ahead, I'm listening.", "Okay. What's on your mind?"]},
+        "tagalog": {"all": [
+            "Sige! Ano'ng nasa isip mo?", "Tara, kwentuhan! Kumusta talaga ang araw mo?", "Nakikinig ako. Ano'ng gusto mong pag-usapan?",
+            "Wala akong chika, pero gusto kong marinig ang sa'yo! Ano'ng nangyari ngayon?", "Sige! Ikwento mo ang isang magandang nangyari ngayon.",
+            "Nandito ako. Kahit saan ka magsimula — ano'ng meron sa'yo?", "Tara, usap tayo! Ano'ng pinakamasaya sa linggo mo?",
+            "Kwentuhan mode, on. Ano'ng bago sa'yo?",
+        ], "diretso": ["Sige. Ano'ng meron?", "Sige, nakikinig ako.", "Okay. Ano'ng nasa isip mo?"]},
+        "both": {"all": [
+            "Sure! Ano'ng nasa isip mo?", "Tara, chika! Kumusta talaga ang day mo?", "I'm all ears. Ano'ng gusto mong pag-usapan?",
+            "Wala akong tea, pero gusto kong marinig ang sa'yo! Ano'ng nangyari today?", "Okay! Kwento ka ng isang good thing today.",
+            "Nandito ako. Start anywhere — what's up sa'yo?", "Let's talk! Ano'ng best part ng week mo so far?",
+            "Chika mode, on. Ano'ng bago sa'yo?",
+        ], "diretso": ["Sure. Ano'ng meron?", "Go, nakikinig ako.", "Okay. Ano'ng nasa isip mo?"]},
+    },
+}
+TALK_OPEN = {
+    "english": {"default": ["", "Hey, {name}!", "Hi, {name}."], "diretso": [""], "malambing": ["", "Aww, {name}!", "Hey, {name}!"]},
+    "tagalog": {"default": ["", "Uy, {name}!", "Hi, {name}."], "diretso": [""], "malambing": ["", "Ay, {name}!", "Uy, {name}!"]},
+    "both": {"default": ["", "Hey, {name}!", "Uy, {name}."], "diretso": [""], "malambing": ["", "Aww, {name}!", "Uy, {name}!"]},
+}
+TALK_CLOSE = {
+    "english": {"default": [""], "diretso": [""], "malambing": ["", "💜"]},
+    "tagalog": {"default": [""], "diretso": [""], "malambing": ["", "💜"]},
+    "both": {"default": [""], "diretso": [""], "malambing": ["", "💜"]},
+}
+for _lang in TALK_OPEN:
+    for _style in TALK_OPEN[_lang]:
+        OPEN[_lang][_style]["talk"] = TALK_OPEN[_lang][_style]
+        CLOSE[_lang][_style]["talk"] = TALK_CLOSE[_lang][_style]
+for _sit, _v in TALK_CORE.items():
+    CORE[_sit] = _v
+    FAMILY[_sit] = "talk"
+
+
 # Pagkatapos ng "✖ Huwag na" sa tanong — walang nase-save, kaya walang "Settings".
 SKIP_OPEN = {
     "english": {"default": ["", "No problem.", "That's fine."], "diretso": [""], "malambing": ["", "Aww, that's okay.", "Of course, {name}."]},
@@ -557,6 +800,8 @@ def _words(t):
 
 def clash(o, c, d):
     """Pangit na kombinasyon? Hal. "Okay! Okay, …", o dulo na inuulit ang laman."""
+    if sum("💜" in x for x in (o, c, d)) > 1:  # isang puso lang
+        return True
     wo, wc, wd = _words(o), _words(c), _words(d)
     if wo and wc and wo[0] == wc[0]:
         return True

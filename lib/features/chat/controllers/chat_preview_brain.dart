@@ -81,6 +81,10 @@ import 'package:zoe_remind/rag/search_misses.dart';
 ///   Wala pang stress help + down ang user → isang beses lang magtatanong:
 ///   "Kapag stressed ka, ano'ng nakakatulong?" [🎧 Makinig] [💡 Payo] [😄 Pampagaan] [✖ Huwag na]
 ///
+/// Small talk (buong mensahe lang): "wassup" → bati; "kumusta ka?" → "Okay naman
+/// ako! Ikaw?"; "sino ka?" / "tao ka ba?" → tapat na AI si Zoe; "good night",
+/// "bye", "ang galing mo", "love you zoe" (hindi romantic), "bored ako".
+///
 /// Nararamdaman (2c):
 ///   "pagod na ako"              → feelingTired script, magiging gentle si Zoe
 ///   "hi zoe, stressed ako"      → feelingStressed (hindi na bati)
@@ -254,7 +258,8 @@ class ChatPreviewBrain {
     // OFF sa Settings → walang binibilang. Neutral → wala.
     // Level 3: "kapag stressed ako, makinig ka muna" ay kagustuhan, hindi
     // nararamdaman ngayon → hindi binibilang, hindi nagbabago ang mood.
-    final aboutMe = route.route == ZoeRoute.memory;
+    // Small talk ("good night", "bored ako") → hindi rin binibilang.
+    final aboutMe = route.route == ZoeRoute.memory || route.talk != null;
     if (tone != UserTone.neutral && !aboutMe) _logTone(tone);
     final event = aboutMe ? null : ToneDetector.toMoodEvent(tone);
     if (event != null) {
@@ -291,6 +296,13 @@ class ChatPreviewBrain {
       // "remember… i love to remind…") → TANONG muna, hindi agad card.
       case ZoeRoute.askKind:
         return gently([askKind(text, memory: route.memoryChip)]);
+
+      // Small talk: "kumusta ka?", "sino ka?", "tao ka ba?", "good night", "bye"…
+      // ("wassup" / "hello" → karaniwang bati sa _answer.)
+      case ZoeRoute.greeting when route.talk != null && CompanionLines.talkFor(route.talk!) != null:
+        return [
+          TextEntry(fromZoe: true, text: _sayFor(CompanionLines.talkFor(route.talk!)!)),
+        ];
 
       // "pagod na ako", "hi zoe, stressed ako" → script para sa nararamdaman.
       case ZoeRoute.feeling:
