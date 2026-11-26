@@ -123,7 +123,7 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
       case DraftKind.note:
         if (e.savedId != null) context.push('/notes/edit/${e.savedId}');
       case DraftKind.memory:
-        context.push('/settings/memories');
+        break; // auto-save na ang memory (walang card / listahan)
     }
   }
 

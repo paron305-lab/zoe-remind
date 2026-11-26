@@ -24,6 +24,7 @@ import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.da
 import 'package:zoe_remind/memory/companion_facts.dart';
 import 'package:zoe_remind/memory/habit_rules.dart';
 import 'package:zoe_remind/memory/habit_watcher.dart';
+import 'package:zoe_remind/memory/memory_recall.dart';
 
 /// Estado ng header: Ready / Thinking… / No brain yet / Downloading.
 enum ZoeChatStatus { ready, thinking, preview, noBrain, downloading }
@@ -31,7 +32,9 @@ enum ZoeChatStatus { ready, thinking, preview, noBrain, downloading }
 /// Lahat ng logic ng Zoe Chat screen (walang widgets dito).
 ///
 /// Golden rule: si Zoe (AI) ay nagmumungkahi lang. Ang code na ito ang
-/// nagva-validate at nagse-save — at laging pagkatapos ng Accept ng user.
+/// nagva-validate at nagse-save — reminder / task / note: pagkatapos ng Accept.
+/// Memory (tungkol sa user): auto-save, walang card ([_autoRemember]) —
+/// kontrolado ng Long-term memory ON/OFF sa Settings.
 class ZoeChatController extends ChangeNotifier {
   ZoeChatController({ChatPreviewBrain? brain, HabitWatcher? habits})
       : _brain = brain ?? ChatPreviewBrain(),
@@ -266,7 +269,9 @@ class ZoeChatController extends ChangeNotifier {
     await _zoeSays(reply);
   }
 
-  Future<void> _zoeSays(List<ChatEntry> reply) async {
+  Future<void> _zoeSays(List<ChatEntry> input) async {
+    // Memory: wala nang "Tandaan ko ba?" card — si Zoe na mismo ang nagse-save.
+    final reply = await _autoRemember(input);
     entries.addAll(reply);
     _notify();
     for (final r in reply) {
@@ -278,6 +283,76 @@ class ZoeChatController extends ChangeNotifier {
         _ => null,
       };
       if (line != null) await _save('zoe', line);
+    }
+  }
+
+  // ───────────────────────── Auto memory ─────────────────────────
+
+  /// Bawat memory draft sa sagot → i-save AGAD (walang card, walang tanong).
+  /// Kapalit ng card: linya ni Zoe ("Sige, tatandaan ko 'yan." / "AC na ang
+  /// itatawag ko sa'yo."). Ang ON/OFF sa Settings › Privacy & memory ang
+  /// nagdedesisyon kung nagse-save si Zoe.
+  Future<List<ChatEntry>> _autoRemember(List<ChatEntry> reply) async {
+    if (!reply.any(_isMemoryCard)) return reply;
+    final out = <ChatEntry>[];
+    for (final r in reply) {
+      if (r is ConfirmEntry && _isMemoryCard(r)) {
+        out.addAll(await _remember(r.memory!));
+      } else {
+        out.add(r);
+      }
+    }
+    return out;
+  }
+
+  static bool _isMemoryCard(ChatEntry e) => e is ConfirmEntry && e.kind == DraftKind.memory;
+
+  /// I-save ang isang memory + ang linya ni Zoe pagkatapos.
+  /// Habit (B6): sinabi na ng habit line na "tatandaan ko" → walang dagdag na linya.
+  Future<List<ChatEntry>> _remember(MemoryDraft d) async {
+    final content = d.content.trim();
+    if (content.isEmpty) return const <ChatEntry>[];
+    try {
+      // 'user' = sinabi mo mismo. 'chat' = napansin ni Zoe (habit).
+      // Level 3: anong klase (nickname / style / stress help / win / routine).
+      final fact = CompanionFacts.read(content);
+      // Alam na → "Oo naman, naaalala ko — allergic ka sa hipon." (walang bagong save)
+      // (Nickname / style / stress help → ang sariling linya pa rin: "AC na ang…")
+      if (!d.isSuggestion &&
+          !fact.kind.single &&
+          await _memories.knows(content, kind: fact.kind, value: fact.value)) {
+        return [TextEntry(fromZoe: true, text: MemoryRecall.knownLine(content, language))];
+      }
+      final id = await _memories.add(
+        content,
+        source: d.isSuggestion ? 'chat' : 'user',
+        kind: fact.kind,
+        value: fact.value,
+      );
+      if (id == null) {
+        // OFF ang long-term memory (napatay habang nag-uusap).
+        return d.isSuggestion
+            ? const <ChatEntry>[]
+            : [
+                TextEntry(
+                  fromZoe: true,
+                  text: t('Long-term memory is off. Turn it on in Settings › Privacy & memory.',
+                      'Naka-OFF ang long-term memory. I-ON mo sa Settings › Privacy & memory.'),
+                ),
+              ];
+      }
+      if (d.isSuggestion) return const <ChatEntry>[];
+      return [TextEntry(fromZoe: true, text: await _brain.savedLine(fact, language))];
+    } catch (err) {
+      debugPrint('Zoe chat: auto memory failed: $err');
+      if (d.isSuggestion) return const <ChatEntry>[];
+      return [
+        TextEntry(
+          fromZoe: true,
+          text: t("I couldn't remember that. Please try again.",
+              'Hindi ko natandaan. Pakisubukan ulit.'),
+        ),
+      ];
     }
   }
 
@@ -554,9 +629,9 @@ class ZoeChatController extends ChangeNotifier {
 
   // ───────────────────────── Implicit learning (B6) ─────────────────────────
 
-  /// Pagkatapos mag-save ng reminder: "Napansin ko… tandaan ko ba?" + card.
-  /// Walang lalabas kapag OFF ang long-term memory, may memory na tungkol
-  /// diyan, tinanggihan na, o naitanong na kamakailan (HabitWatcher).
+  /// Pagkatapos mag-save ng reminder: "Napansin ko… tatandaan ko 'yan." —
+  /// auto-save na (walang card). Walang lalabas kapag OFF ang long-term memory,
+  /// may memory na tungkol diyan, o naipakita na kamakailan (HabitWatcher).
   Future<void> _offerHabit() async {
     try {
       final suggestion = await _habits.next();

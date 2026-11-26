@@ -108,6 +108,47 @@ void main() {
     expect(MemoryRules.mentionsReminder('tandaan mo na mas gusto ko ng morning reminders'), isFalse);
   });
 
+  group('isRememberAboutMe — auto-learn (kahit walang "tandaan mo")', () {
+    for (final q in [
+      'paborito ko ang sinigang',
+      'favorite ko ang adobo',
+      'my favorite color is purple',
+      'allergic ako sa hipon',
+      "i'm allergic to shrimp",
+      'vegetarian ako',
+      "i'm vegan",
+      'birthday ko ay march 3',
+      'my birthday is june 5',
+      'hindi ako kumakain ng baboy',
+      "i don't eat pork",
+    ]) {
+      test('"$q"', () => expect(MemoryRules.isRememberAboutMe(q), isTrue));
+    }
+    for (final q in [
+      'paboritong cake ni mama ay ube', // hindi tungkol sa user → note
+      'ano bday ko?', // tanong
+      'what is my favorite color', // tanong
+      'birthday ko na!', // ngayon lang, hindi katotohanan
+      'birthday ko bukas', // malapit na oras
+      'hindi ako kumakain ng maayos', // nararamdaman, hindi kagustuhan
+      "i don't eat enough",
+    ]) {
+      test('hindi: "$q"', () => expect(MemoryRules.isRememberAboutMe(q), isFalse));
+    }
+    test('extract — buong sinabi', () {
+      expect(MemoryRules.extract('allergic ako sa hipon, zoe'), 'Allergic ako sa hipon');
+    });
+    test('extract — ang katotohanan lang, hindi ang buong mensahe', () {
+      expect(MemoryRules.extract('wait allergic ako sa hipon diba sinabi ko sayo'),
+          'Allergic ako sa hipon');
+      expect(MemoryRules.extract('uy vegetarian ako kasi bawal sa akin'), 'Vegetarian ako');
+    });
+    test('sameWords — pareho = alam na; gusto ↔ ayaw = hindi pareho', () {
+      expect(MemoryRules.sameWords('Allergic ako sa hipon', 'allergic ako sa hipon'), isTrue);
+      expect(MemoryRules.sameWords('Gusto ko ng kape', 'Ayoko ng kape'), isFalse);
+    });
+  });
+
   test('extract — tinatanggal ang bagong trigger', () {
     expect(MemoryRules.extract('you have to remember I love sinigang'), 'I love sinigang');
     expect(MemoryRules.extract('fyi I love my dog Choco'), 'I love my dog Choco');

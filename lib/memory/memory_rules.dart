@@ -13,6 +13,8 @@ import 'package:zoe_remind/rag/query_terms.dart';
 ///   "you have to remember i love sinigang"          → MEMORY
 ///   "call me AC" / "tawagin mo akong AC"            → MEMORY (kahit walang "tandaan")
 ///   "remember… i love to remind about…"             → TANONG muna (memory o reminder?)
+///   "allergic ako sa hipon" / "paborito ko ang sinigang" → MEMORY (auto-learn,
+///                                                       kahit walang "tandaan")
 class MemoryRules {
   MemoryRules._();
 
@@ -53,6 +55,33 @@ class MemoryRules {
     r'|\bmy\s+name\s+is\s+[a-z]|\b(?:ang\s+)?pangalan\s+ko\s+ay\s+[a-z]',
   );
 
+  /// Malinaw na katotohanan tungkol sa user — natututunan ni Zoe kahit walang
+  /// "tandaan mo": paborito, allergy, vegetarian / vegan, birthday, hindi kinakain.
+  ///   "paborito ko ang sinigang" · "allergic ako sa hipon" · "vegetarian ako"
+  ///   "birthday ko ay March 3" · "I'm allergic to shrimp" · "I don't eat pork"
+  /// Hindi: "paboritong cake ni mama" (hindi tungkol sa user), tanong ("ano bday ko?").
+  static final _selfFact = RegExp(
+    r'\bpaborito\s+(?:ko|kong)\b|\bfavou?rite\s+(?:ko|kong)\b|\bmy\s+favou?rite\b'
+    r"|\ballergic\s+ako\b|\bmay\s+allergy\s+ako\b|\b(?:i'?m|i\s+am|im)\s+allergic\b"
+    r'|\bi\s+have\s+(?:an?\s+)?allerg'
+    r"|\b(?:vegetarian|vegan)\s+ako\b|\b(?:i'?m|i\s+am|im)\s+(?:a\s+)?(?:vegetarian|vegan)\b"
+    r'|\b(?:birthday|bday|kaarawan)\s+ko\s+(?:ay\s+)?(?:sa\s+)?(?!(?:na|ngayon|today|kasi|kahapon|nung|noong|pala)\b)[a-z0-9]'
+    r'|\bmy\s+(?:birthday|bday)\s+is\s+(?!(?:today|tomorrow|coming|soon)\b)'
+    r'|\b(?:hindi|di)\s+ako\s+kumakain\s+ng\s+(?!(?:maayos|mabuti|tama|sapat|marami)\b)'
+    r"|\bi\s+(?:don'?t|do\s+not)\s+eat\s+(?!(?:enough|much|well|properly|anymore|anything|lately)\b)",
+  );
+
+  /// Dulo ng katotohanan sa auto-learn ("…, diba sinabi ko sayo" / "… kasi …").
+  static final _factEnd = RegExp(
+    r'\s*(?:[,.!?;]|\b(?:diba|di\s+ba|sinabi|sabi\s+ko|remember|right|tama|alam\s+mo'
+    r'|kasi|pero|but|because|okay|ok|ha|haha\w*|hehe\w*)\b)',
+  );
+
+  /// Tanong → hindi sine-save ("ano paborito ko?", "what's my favorite color?").
+  static final _asks = RegExp(
+    r'\?|\b(?:ano|anong|sino|kailan|saan|paano|bakit|ba|what|whats|when|who|where|how|do\s+you|does)\b',
+  );
+
   /// Utos na magpaalala sa loob ng memory na mensahe → TANUNGIN muna.
   /// ("reminders" na pangngalan ay hindi kasama: "gusto ko ng morning reminders").
   static final _remindVerb = RegExp(
@@ -66,9 +95,13 @@ class MemoryRules {
 
   /// true = ("tandaan mo / remember that" + tungkol sa iyo) o pangalan,
   /// at walang oras. [lower] = maliit na titik (na-normalize na).
+  ///
+  /// Auto-learn: malinaw na katotohanan ([_selfFact]) kahit walang
+  /// "tandaan mo" — basta hindi tanong.
   static bool isRememberAboutMe(String lower) {
     final aboutMe = _trigger.hasMatch(lower) && _aboutMe.hasMatch(lower);
-    if (!aboutMe && !_identity.hasMatch(lower)) return false;
+    final learned = _selfFact.hasMatch(lower) && !_asks.hasMatch(lower);
+    if (!aboutMe && !learned && !_identity.hasMatch(lower)) return false;
     if (WhenParser.time(lower) != null || _soon.hasMatch(lower)) return false;
     return true;
   }
@@ -86,7 +119,18 @@ class MemoryRules {
     var s = text.replaceAll(RegExp(r'\s+'), ' ').trim();
     s = s.replaceFirst(RegExp(r'^zoe\b[\s,:]*', caseSensitive: false), '');
     final m = _trigger.firstMatch(s);
-    if (m != null) s = '${s.substring(0, m.start)} ${s.substring(m.end)}';
+    if (m != null) {
+      s = '${s.substring(0, m.start)} ${s.substring(m.end)}';
+    } else {
+      // Auto-learn (walang "tandaan mo"): ang katotohanan lang, hindi ang buong
+      // mensahe. "wait allergic ako sa hipon diba sinabi ko sayo" → "Allergic ako sa hipon"
+      final f = _selfFact.firstMatch(s.toLowerCase());
+      if (f != null) {
+        s = s.substring(f.start);
+        final end = _factEnd.firstMatch(s.toLowerCase());
+        if (end != null && end.start > 0) s = s.substring(0, end.start);
+      }
+    }
     s = s.trim();
     // "… na / that / ito: …" sa unahan
     s = s.replaceFirst(
@@ -135,6 +179,17 @@ class MemoryRules {
     final common = wa.intersection(wb).length;
     final all = wa.union(wb).length;
     return all >= 3 && common / all >= 0.8;
+  }
+
+  /// Eksaktong pareho ([sameMemory] na walang palit ng gusto / ayaw).
+  /// Para sa "alam ko na 'yan": "Allergic ako sa hipon" = "allergic ako sa hipon".
+  static bool sameWords(String a, String b) {
+    final wa = _words(a);
+    final wb = _words(b);
+    if (wa.isEmpty || wb.isEmpty) {
+      return QueryTerms.tokens(a).join(' ') == QueryTerms.tokens(b).join(' ');
+    }
+    return _sameSet(wa, wb);
   }
 
   static bool _sameSet(Set<String> a, Set<String> b) => a.length == b.length && a.containsAll(b);

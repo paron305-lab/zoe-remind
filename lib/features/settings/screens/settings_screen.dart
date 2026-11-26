@@ -13,7 +13,6 @@ import 'package:zoe_remind/core/services/data_wipe.dart';
 import 'package:zoe_remind/core/widgets/zoe_snackbar.dart';
 import 'package:zoe_remind/database/models/model_info.dart';
 import 'package:zoe_remind/database/repositories/chat_history_repository.dart';
-import 'package:zoe_remind/database/repositories/memory_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
 import 'package:zoe_remind/features/companion/models/mood_week.dart';
@@ -21,7 +20,6 @@ import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/onboarding/widgets/profile_page.dart' show showPolicySheet;
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
-import 'package:zoe_remind/features/settings/screens/memories_screen.dart';
 import 'package:zoe_remind/features/settings/widgets/brain_card.dart';
 import 'package:zoe_remind/features/settings/widgets/profile_card.dart';
 import 'package:zoe_remind/features/settings/widgets/settings_dialogs.dart';
@@ -44,7 +42,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   final _settings = SettingsRepository();
   final _chats = ChatHistoryRepository();
-  final _memories = MemoryRepository();
   final _alarms = ReminderAlarmService.instance;
   final _downloader = ModelDownloader.instance;
   final _moodLog = MoodLog.instance;
@@ -69,7 +66,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   SetupStatus? _setup;
   int _chatCount = 0;
-  int _memoryCount = 0;
   bool _longTermMemory = true;
   bool _developer = false;
 
@@ -91,7 +87,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     ChatHistoryRepository.changes.addListener(_loadCounts);
-    MemoryRepository.changes.addListener(_loadCounts);
     _moodLog.changes.addListener(_loadCounts);
     // Bell sa Home → sabay ang switch dito.
     _alarms.enabled.addListener(_rebuild);
@@ -106,7 +101,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     ChatHistoryRepository.changes.removeListener(_loadCounts);
-    MemoryRepository.changes.removeListener(_loadCounts);
     _moodLog.changes.removeListener(_loadCounts);
     _alarms.enabled.removeListener(_rebuild);
     _alarms.sound.removeListener(_rebuild);
@@ -160,12 +154,10 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   Future<void> _loadCounts() async {
     try {
       final chats = await _chats.messageCount();
-      final memories = await _memories.count();
       final week = await _moodLog.week();
       if (!mounted) return;
       setState(() {
         _chatCount = chats;
-        _memoryCount = memories;
         _moodWeek = week;
       });
     } catch (e) {
@@ -515,23 +507,10 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     await _save(_chats.clearAll, ok: 'Chat history cleared');
   }
 
-  Future<void> _clearMemories() async {
-    final ok = await confirmAction(
-      context,
-      palette: _p,
-      title: "Clear Zoe's memories?",
-      message: 'Makakalimutan ni Zoe ang lahat ng natutunan niya tungkol sa iyo. '
-          'Hindi ito mababawi.',
-      confirmLabel: 'Clear',
-    );
-    if (!ok) return;
-    await _save(_memories.clearAll, ok: 'Memories cleared');
-  }
-
   Future<void> _setLongTermMemory(bool on) async {
     setState(() => _longTermMemory = on);
     await _save(() => _settings.setLongTermMemory(on),
-        ok: on ? 'Zoe will remember what matters 💭' : "Zoe won't save new memories");
+        ok: on ? 'Zoe will learn and remember what you tell her 💭' : "Zoe won't save new memories");
   }
 
   /// ON → magbibilang si Zoe. OFF → titigil at buburahin ang laman (may confirm).
@@ -803,22 +782,13 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                           onTap: _chatCount == 0 ? null : _clearChats,
                         ),
                       ),
-                      SettingsTile(
-                        icon: Icons.auto_awesome_outlined,
-                        title: MemoriesScreen.title,
-                        subtitle: _count(_memoryCount, 'memory', 'memories'),
-                        onTap: () => context.push('/settings/memories'),
-                        palette: p,
-                        trailing: _ClearButton(
-                          palette: p,
-                          onTap: _memoryCount == 0 ? null : _clearMemories,
-                        ),
-                      ),
                       SettingsTile.toggle(
                         icon: Icons.psychology_outlined,
                         title: 'Long-term memory',
+                        // Auto-save: natututunan ni Zoe ang sinasabi mo (walang tanong).
+                        // Hindi ipinapakita ang listahan ng memories — ON/OFF lang.
                         subtitle: _longTermMemory
-                            ? 'Zoe remembers what matters to you'
+                            ? 'Zoe learns and remembers what you tell her'
                             : "Zoe won't save new memories",
                         value: _longTermMemory,
                         onChanged: _setLongTermMemory,

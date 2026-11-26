@@ -93,7 +93,7 @@ void main() {
     expect(a.assumption, 'Galing sa sinabi mo sa akin');
     expect(a.text, contains('morning reminders'));
     expect(a.rows.single.tone, AnswerTone.memory);
-    expect(a.rows.single.route, '/settings/memories');
+    expect(a.rows.single.route, isNull); // walang listahan ng memories
   });
 
   test('OFF ang long-term memory → hindi binabasa ang memories', () async {

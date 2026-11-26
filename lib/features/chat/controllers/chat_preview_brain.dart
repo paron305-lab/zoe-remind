@@ -30,6 +30,7 @@ import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.da
 import 'package:zoe_remind/memory/companion_facts.dart';
 import 'package:zoe_remind/memory/companion_profile.dart';
 import 'package:zoe_remind/memory/habit_rules.dart';
+import 'package:zoe_remind/memory/memory_recall.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
 import 'package:zoe_remind/rag/history_query.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
@@ -122,6 +123,7 @@ class ChatPreviewBrain {
     Future<CompanionProfile> Function()? profile,
     Future<bool> Function()? helpAsked,
     Future<void> Function()? markHelpAsked,
+    Future<List<String>> Function()? memories,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
         _retriever = retriever ?? Retriever(),
@@ -136,7 +138,9 @@ class ChatPreviewBrain {
         _profileOf = profile ?? MemoryRepository().profile,
         _helpAsked = helpAsked ??
             (() async => await SettingsRepository().getValue(helpAskedKey) == 'true'),
-        _markHelpAsked = markHelpAsked ?? (() => SettingsRepository().setValue(helpAskedKey, 'true'));
+        _markHelpAsked = markHelpAsked ?? (() => SettingsRepository().setValue(helpAskedKey, 'true')),
+        _memoriesOf = memories ??
+            (() async => [for (final m in await MemoryRepository().getAll()) m.content]);
 
   /// Settings key: naitanong na ba ang "Kapag stressed ka, ano'ng nakakatulong?"
   /// (Binubura ng "Burahin lahat".)
@@ -180,6 +184,9 @@ class ChatPreviewBrain {
   /// Naitanong na ba ang stress help? Default: settings.
   final Future<bool> Function() _helpAsked;
   final Future<void> Function() _markHelpAsked;
+
+  /// Memory Recall: lahat ng memory (content lang). Default: MemoryRepository.
+  final Future<List<String>> Function() _memoriesOf;
 
   /// Ang alam ni Zoe tungkol sa user (kinukuha isang beses kada reply).
   CompanionProfile _profile = CompanionProfile.empty;
@@ -277,6 +284,24 @@ class ChatPreviewBrain {
     List<ChatEntry> gently(List<ChatEntry> answer) => tone.isDown && !aboutMe && !_profile.isDiretso
         ? [TextEntry(fromZoe: true, text: _say(ZoeSituation.feelingAck)), ...answer]
         : answer;
+
+    // Memory Recall: may sinabi ka dati na may kinalaman dito?
+    //   "ang sarap kumain ng hipon" + "Allergic ako sa hipon" → "Teka — diba allergic ka sa hipon?"
+    //   "di ba sinabi ko allergic ako sa hipon?" → "Oo naman, naaalala ko…"
+    // Usapan lang (feeling / bati / hindi alam) — hindi sa utos (reminder, task, note…).
+    if (route.route == ZoeRoute.feeling ||
+        route.route == ZoeRoute.greeting ||
+        route.route == ZoeRoute.unknown) {
+      final hit = await _recall(lower);
+      if (hit != null) {
+        final line = TextEntry(fromZoe: true, text: MemoryRecall.lineFor(hit, _lang));
+        if (!tone.isDown) return [line];
+        // Pagod / malungkot: malasakit muna, saka ang paalala. Paborito → hindi muna.
+        if (hit.known || hit.fact.kind == RecallKind.avoid) {
+          return [TextEntry(fromZoe: true, text: _say(ZoeSituation.comfort)), line];
+        }
+      }
+    }
 
     switch (route.route) {
       // "patayin mo ang alarm" → tulong, hindi bagong reminder.
@@ -474,8 +499,8 @@ class ChatPreviewBrain {
     };
   }
 
-  /// B6 implicit learning: "Napansin ko, 5 beses… tandaan ko ba?" + memory card.
-  /// Ang card ay MUNGKAHI (habit) — Accept muna bago ma-save.
+  /// B6 implicit learning: "Napansin ko, 5 beses… tatandaan ko 'yan." + memory
+  /// draft. Ang controller ang nag-a-auto-save (walang card na lalabas).
   List<ChatEntry> habitOffer(HabitSuggestion s, ZoeLanguage lang) {
     _lang = lang;
     _mood = _moodOf();
@@ -708,12 +733,23 @@ class ChatPreviewBrain {
     );
   }
 
-  /// "📝 Wifi · Nov 18" → bubukas ang note. "💜 Mas gusto ko… · Nov 2" → Memories.
+  /// "📝 Wifi · Nov 18" → bubukas ang note. "💜 Mas gusto ko… · Nov 2" → hindi
+  /// napipindot (walang listahan ng memories sa app — ON/OFF lang sa Settings).
   AnswerRow _sourceRow(RetrievalDoc d) => AnswerRow(
         d.isMemory ? AnswerTone.memory : AnswerTone.note,
         '${d.title} · ${ZoeDate.short(d.updatedAt)}',
-        route: d.isMemory ? '/settings/memories' : '/notes/edit/${d.id}',
+        route: d.isMemory ? null : '/notes/edit/${d.id}',
       );
+
+  /// Memory Recall (code, walang Qwen). OFF ang long-term memory / pumalya → null.
+  Future<RecallHit?> _recall(String lower) async {
+    try {
+      if (!await _memoryOnSafe()) return null;
+      return MemoryRecall.check(lower, await _memoriesOf());
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Long-term memory ON? Kapag pumalya ang database → OFF (ligtas).
   Future<bool> _memoryOnSafe() async {

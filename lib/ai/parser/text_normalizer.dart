@@ -41,6 +41,13 @@ class TextNormalizer {
     'slmt': 'salamat', 'salamuch': 'salamat', 'slamat': 'salamat', 'tnx': 'thanks',
     'tnks': 'thanks', 'thx': 'thanks', 'thnx': 'thanks', 'ty': 'thank you',
     'tysm': 'thank you', 'tyvm': 'thank you',
+    // ── Mali-maling baybay (Memory Recall: "allegeric ako sa hipon")
+    'allegeric': 'allergic', 'alergic': 'allergic', 'allergik': 'allergic',
+    'alergik': 'allergic', 'alerdyik': 'allergic', 'allerdyik': 'allergic',
+    'alerjik': 'allergic', 'allerhic': 'allergic',
+    'alerhiya': 'allergy', 'alergy': 'allergy', 'allergie': 'allergy',
+    'vegeterian': 'vegetarian', 'vegitarian': 'vegetarian', 'vegetaryan': 'vegetarian',
+    'paborite': 'paborito', 'fav': 'favorite', 'fave': 'favorite', 'favorit': 'favorite',
     // ── English text-speak
     'pls': 'please', 'plz': 'please', 'plss': 'please', 'pleaze': 'please',
     'tmrw': 'tomorrow', 'tmr': 'tomorrow', 'tmrow': 'tomorrow', '2mrw': 'tomorrow',

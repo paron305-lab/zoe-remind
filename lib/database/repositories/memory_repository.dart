@@ -98,6 +98,28 @@ class MemoryRepository {
     return id;
   }
 
+  /// Alam na ba ni Zoe ito? (Memory Recall: "diba sinabi ko sa'yo…" →
+  /// "Oo naman, naaalala ko…" imbes na "I'll remember that.")
+  ///   nickname / style / stress_help → parehong kind at value
+  ///   iba → parehong mga salita ([MemoryRules.sameWords])
+  /// OFF ang long-term memory → false.
+  Future<bool> knows(String content, {FactKind kind = FactKind.general, String? value}) async {
+    if (!await _settings.isLongTermMemoryOn()) return false;
+    final text = content.trim();
+    if (text.isEmpty) return false;
+    final db = await ZoeDatabase.instance.database;
+    final rows = await db.query(_table, columns: ['content', 'kind', 'value']);
+    for (final row in rows) {
+      final rowKind = FactKind.fromDb(row['kind'] as String?);
+      if (kind.single) {
+        if (rowKind == kind && row['value'] == value) return true;
+        continue;
+      }
+      if (!rowKind.single && MemoryRules.sameWords(row['content'] as String, text)) return true;
+    }
+    return false;
+  }
+
   Future<int> count() async {
     final db = await ZoeDatabase.instance.database;
     final rows = await db.rawQuery('SELECT COUNT(*) AS n FROM $_table');

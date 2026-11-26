@@ -437,29 +437,29 @@ class ZoeLines {
     ZoeSituation.habitMorning: {
       ZoeLanguage.english: [
         "I noticed you've set {count} reminders for 8 AM or earlier. Looks like you like "
-            'morning reminders — should I remember that?',
+            "morning reminders — I'll remember that.",
       ],
       ZoeLanguage.tagalog: [
         'Napansin ko, {count} beses ka nang nag-set ng paalala nang 8 AM o mas maaga. '
-            'Mukhang gusto mo ng paalala sa umaga — tatandaan ko ba?',
+            "Mukhang gusto mo ng paalala sa umaga — tatandaan ko 'yan.",
       ],
       ZoeLanguage.both: [
         'Napansin ko, {count} beses ka nang nag-set ng reminder nang 8 AM o mas maaga. '
-            'Mukhang gusto mo ng morning reminders — tandaan ko ba?',
+            "Mukhang gusto mo ng morning reminders — tatandaan ko 'yan.",
       ],
     },
     ZoeSituation.habitEvening: {
       ZoeLanguage.english: [
         "I noticed you've set {count} reminders for 6 PM or later. Looks like evenings "
-            'work best for you — should I remember that?',
+            "work best for you — I'll remember that.",
       ],
       ZoeLanguage.tagalog: [
         'Napansin ko, {count} beses ka nang nag-set ng paalala nang 6 PM pataas. '
-            'Mukhang mas gusto mo ng paalala sa gabi — tatandaan ko ba?',
+            "Mukhang mas gusto mo ng paalala sa gabi — tatandaan ko 'yan.",
       ],
       ZoeLanguage.both: [
         'Napansin ko, {count} beses ka nang nag-set ng reminder nang 6 PM pataas. '
-            'Mukhang mas gusto mo ng reminders sa gabi — tandaan ko ba?',
+            "Mukhang mas gusto mo ng reminders sa gabi — tatandaan ko 'yan.",
       ],
     },
     ZoeSituation.doneRangeList: {

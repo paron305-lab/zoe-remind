@@ -15,6 +15,9 @@ void main() {
       'gm zoe': 'good morning zoe',
       'nvm': 'never mind',
       'ung susi q': 'yung susi ko',
+      'wit allegeric ako sa hipon': 'wit allergic ako sa hipon',
+      'alergic aq sa mani': 'allergic ako sa mani',
+      'vegeterian ako': 'vegetarian ako',
     };
     cases.forEach((input, want) => expect(TextNormalizer.normalize(input), want, reason: input));
   });

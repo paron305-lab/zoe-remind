@@ -14,7 +14,6 @@ import 'package:zoe_remind/features/reminders/screens/reminder_ringing_screen.da
 import 'package:zoe_remind/features/reminders/screens/reminder_setup_screen.dart';
 import 'package:zoe_remind/features/settings/screens/chat_history_screen.dart';
 import 'package:zoe_remind/features/settings/screens/developer_screen.dart';
-import 'package:zoe_remind/features/settings/screens/memories_screen.dart';
 import 'package:zoe_remind/features/settings/screens/settings_screen.dart';
 import 'package:zoe_remind/features/statistics/screens/history_statistics_screen.dart';
 import 'package:zoe_remind/features/tasks/screens/task_form_screen.dart';
@@ -128,10 +127,6 @@ final appRouter = GoRouter(
       builder: (context, state) => ChatConversationScreen(
         conversationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
       ),
-    ),
-    GoRoute(
-      path: '/settings/memories',
-      builder: (context, state) => const MemoriesScreen(),
     ),
     GoRoute(
       path: '/settings/developer',
