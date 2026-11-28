@@ -13,6 +13,7 @@ import 'package:zoe_remind/rag/retriever.dart';
 /// Takbuhin:  flutter test test/chat/notes_answers_test.dart
 ///
 /// B3: "ano wifi password ko?" → Retriever → sagot + mga source.
+/// R2: sigurado → "Ito ang nakita ko…" · hindi sigurado → "Baka ito? 🤔".
 /// Walang database — fake SearchRepository.
 
 /// Hindi tinatawag si Qwen sa test.
@@ -82,6 +83,7 @@ void main() {
   test('"ano wifi password ko?" → note + "Galing sa notes mo" + mga source', () async {
     final a = await ask(brain(), 'ano wifi password ko?');
     expect(a.assumption, 'Galing sa notes mo');
+    expect(a.text, startsWith('Ito ang nakita ko sa notes mo'));
     expect(a.text, contains('zoe123'));
     expect(a.rows.map((r) => r.label), ['Wifi · Nov 18', 'Bahay · Nov 2']);
     expect(a.rows.map((r) => r.tone).toSet(), {AnswerTone.note});
@@ -92,6 +94,8 @@ void main() {
     final a = await ask(brain(), 'ano gusto ko sa umaga?');
     expect(a.assumption, 'Galing sa sinabi mo sa akin');
     expect(a.text, contains('morning reminders'));
+    // R2: "umaga" ay wala sa memory ("morning") → hindi sigurado.
+    expect(a.text, startsWith('Baka ito? 🤔 Sinabi mo sa akin'));
     expect(a.rows.single.tone, AnswerTone.memory);
     expect(a.rows.single.route, isNull); // walang listahan ng memories
   });
@@ -100,6 +104,22 @@ void main() {
     final a = await ask(brain(memoryOn: false), 'ano gusto ko sa umaga?');
     expect(ZoeLines.optionsFor(lang, ZoeSituation.noteNotFound, MoodState.content), contains(a.text));
     expect(a.rows, isEmpty);
+  });
+
+  test('R2: may salitang wala sa notes ("cafe") → "Baka ito? 🤔" + parehong source', () async {
+    final a = await ask(brain(), 'ano wifi password ko sa cafe?');
+    expect(a.assumption, 'Galing sa notes mo');
+    expect(a.text, startsWith('Baka ito? 🤔'));
+    expect(a.text, contains('zoe123'));
+    expect(a.rows.first.route, '/notes/edit/1');
+  });
+
+  test('R2: English → "Not sure, but is this it? 🤔"', () async {
+    final entries = await brain().reply("what's my wifi password at the cafe?", ZoeLanguage.english);
+    final a = entries.single as AnswerEntry;
+    expect(a.assumption, 'From your notes');
+    expect(a.text, startsWith('Not sure, but is this it? 🤔'));
+    expect(a.text, contains('zoe123'));
   });
 
   test('walang nahanap → noteNotFound, walang iniimbento', () async {

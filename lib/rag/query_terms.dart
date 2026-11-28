@@ -3,7 +3,7 @@ import 'package:zoe_remind/rag/stemmer.dart';
 /// Isang salitang hahanapin + mga kapareho nito (synonyms).
 /// Tumatama ang grupo kapag tumama ang KAHIT ISA sa [alts].
 class TermGroup {
-  const TermGroup(this.word, this.alts);
+  const TermGroup(this.word, this.alts, {this.direct});
 
   /// Ang salita mula sa tanong (hal. "password").
   final String word;
@@ -11,6 +11,17 @@ class TermGroup {
   /// Kasama ang [word]. May space = magkasunod na salita ("wi fi").
   /// R1: kasama rin ang ugat, eksakto ("binili" → "=bili").
   final List<String> alts;
+
+  /// R2: ilan sa unahan ng [alts] ang galing sa salita mismo (ang salita,
+  /// walang tuldik, ugat). Ang kasunod ay synonyms. null = lahat.
+  final int? direct;
+
+  /// R2: ang mga alt na hindi synonym. Mas mabigat sa Retriever ang tumama
+  /// sa mismong salita ("trabaho") kaysa sa synonym lang ("office").
+  Iterable<String> get directAlts {
+    final n = direct;
+    return n == null || n >= alts.length ? alts : alts.take(n);
+  }
 
   /// FTS4 MATCH expression: `password* OR passcode* OR pw`.
   String get matchExpr => alts.map(QueryTerms.ftsTerm).join(' OR ');
@@ -205,7 +216,8 @@ class QueryTerms {
       if (key.length < 2 || stopWords.contains(key) || Stemmer.isBareAffix(key)) continue;
       final stem = Stemmer.stem(key);
       if (stopWords.contains(stem) || !seen.add(stem)) continue;
-      groups.add(TermGroup(w, _altsFor(w, key, stem)));
+      final (alts, direct) = _altsFor(w, key, stem);
+      groups.add(TermGroup(w, alts, direct: direct));
       if (groups.length == maxTerms) break;
     }
     return groups;
@@ -219,7 +231,8 @@ class QueryTerms {
     return null;
   }
 
-  static List<String> _altsFor(String word, String key, String stem) {
+  /// Ang mga alt + kung ilan sa unahan ang galing sa salita mismo (R2).
+  static (List<String>, int) _altsFor(String word, String key, String stem) {
     // Synonym ng salita mismo; kung wala, ng ugat ("medicines" → medicine → gamot).
     var gkey = key;
     var group = _groupOf(key);
@@ -233,6 +246,7 @@ class QueryTerms {
     final out = [mark(word), if (key != word) mark(key)];
     // R1: ang ugat, eksakto — tumatama sa ugat ng note ("Binili" → bili).
     if (stem != key && !out.any((a) => bare(a) == stem)) out.add('=$stem');
+    final direct = out.length;
     if (group != null) {
       for (final w in group) {
         final b = bare(w);
@@ -240,7 +254,7 @@ class QueryTerms {
         out.add(w);
       }
     }
-    return out;
+    return (out, direct);
   }
 
   /// Isang alt bilang FTS4 term: phrase → `"wi fi"`, 4+ letra → `code*`,

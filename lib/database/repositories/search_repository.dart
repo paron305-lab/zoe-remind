@@ -13,6 +13,9 @@ import 'package:zoe_remind/rag/rag_models.dart';
 ///
 /// R1: kasama sa paghahanap ang column na search_stems (mga ugat ng salita),
 /// kaya ang "=bili" mula sa "bumili?" ay tumatama sa note na "Binili ko…".
+///
+/// R2: [corpusStats] — ilang notes / memories lahat, at ilan ang may bawat
+/// salita (COUNT lang). Para sa IDF ng Retriever: bihirang salita = mas mabigat.
 class SearchRepository {
   static const _notes = StorageConstants.notesTable;
   static const _notesFts = StorageConstants.notesFtsTable;
@@ -60,6 +63,48 @@ class SearchRepository {
         })
         .toList();
   }
+
+  /// R2: N (lahat ng notes + memories kung ON) at df (ilan ang may bawat
+  /// salita, kapareho ng order ng [terms]) para sa IDF. COUNT lang — walang
+  /// binabasang laman.
+  ///
+  /// null kapag hindi handa ang FTS4 (hindi pa bukas ang database, walang
+  /// FTS4 sa phone, o fake na repository sa test) o pumalya ang query →
+  /// ang Retriever ang tatantiya mula sa mga kandidato.
+  Future<CorpusStats?> corpusStats(
+    List<TermGroup> terms, {
+    bool includeMemories = true,
+  }) async {
+    if (terms.isEmpty || !ZoeDatabase.instance.searchReady) return null;
+    try {
+      final db = await ZoeDatabase.instance.database;
+      var n = await _count(db, 'SELECT COUNT(*) FROM $_notes');
+      if (includeMemories) n += await _count(db, 'SELECT COUNT(*) FROM $_memories');
+      final df = <int>[];
+      for (final t in terms) {
+        var c = await _count(
+          db,
+          'SELECT COUNT(*) FROM $_notesFts WHERE $_notesFts MATCH ?',
+          [t.matchExpr],
+        );
+        if (includeMemories) {
+          c += await _count(
+            db,
+            'SELECT COUNT(*) FROM $_memoriesFts WHERE $_memoriesFts MATCH ?',
+            [t.matchExpr],
+          );
+        }
+        df.add(c);
+      }
+      return CorpusStats(docCount: n, docFreq: df);
+    } on DatabaseException catch (e) {
+      debugPrint('corpusStats failed: $e');
+      return null;
+    }
+  }
+
+  static Future<int> _count(Database db, String sql, [List<Object?> args = const []]) async =>
+      Sqflite.firstIntValue(await db.rawQuery(sql, args)) ?? 0;
 
   // ───────────────────────── FTS4 ─────────────────────────
 

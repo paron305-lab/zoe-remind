@@ -14,6 +14,7 @@ import 'package:zoe_remind/rag/retriever.dart';
 /// B2: SearchRepository + Retriever sa totoong SQLite (sqflite_common_ffi),
 /// sariling temp folder. FTS4 at LIKE fallback — pareho dapat ang sagot
 /// (R1: kasama ang ugat ng salita sa pareho).
+/// R2: corpusStats (N + df para sa IDF) — FTS4 lang; LIKE → null.
 void main() {
   setUpAll(() async {
     sqfliteFfiInit();
@@ -65,6 +66,28 @@ void main() {
         final off = await Retriever().search('anong reminders gusto ko?', includeMemories: false);
         expect(off, isEmpty);
       });
+
+      test('R2: "ano wifi password ko?" → Wifi sigurado, Bahay hindi', () async {
+        final hits = await Retriever().search('ano wifi password ko?');
+        expect(hits.first.isSure, isTrue);
+        expect(hits[1].isSure, isFalse);
+      });
     });
   }
+
+  test('R2: corpusStats — FTS4 → N at df; LIKE → null', () async {
+    await ZoeDatabase.instance.database;
+    final terms = QueryTerms.parse('wifi password');
+
+    ZoeDatabase.instance.searchReady = false;
+    expect(await SearchRepository().corpusStats(terms), isNull);
+
+    ZoeDatabase.instance.searchReady = true;
+    final stats = await SearchRepository().corpusStats(terms);
+    if (stats == null) return; // walang FTS4 sa PC na ito (pumalya ang MATCH) → null, OK
+    expect(stats.docCount, 6); // 5 notes + 1 memory
+    expect(stats.docFreq, [2, 1]); // wifi: Wifi + Bahay · password: Wifi
+    final noMemories = await SearchRepository().corpusStats(terms, includeMemories: false);
+    expect(noMemories!.docCount, 5);
+  });
 }

@@ -31,6 +31,13 @@ enum ZoeSituation {
   /// RAG: ang sagot ay galing sa memories (sinabi ng user). {memory}.
   memoryFound,
 
+  /// R2: may tumama sa notes pero hindi sigurado (kulang ang salita, o
+  /// magkapantay ang dalawa) → "Baka ito? 🤔 {note}".
+  noteMaybe,
+
+  /// R2: gaya ng [noteMaybe], pero galing sa memories. {memory}.
+  memoryMaybe,
+
   /// RAG: "tandaan mo na mas gusto ko…" pero OFF ang long-term memory →
   /// iaalok na i-save na lang bilang note (may card pagkatapos).
   memoryOff,
@@ -422,6 +429,16 @@ class ZoeLines {
       ZoeLanguage.english: ['You told me: {memory}'],
       ZoeLanguage.tagalog: ['Sinabi mo sa akin: {memory}'],
       ZoeLanguage.both: ['Sabi mo sa akin: {memory}'],
+    },
+    ZoeSituation.noteMaybe: {
+      ZoeLanguage.english: ['Not sure, but is this it? 🤔 {note}'],
+      ZoeLanguage.tagalog: ['Baka ito? 🤔 {note}'],
+      ZoeLanguage.both: ['Baka ito? 🤔 {note}'],
+    },
+    ZoeSituation.memoryMaybe: {
+      ZoeLanguage.english: ['Not sure, but is this it? 🤔 You told me: {memory}'],
+      ZoeLanguage.tagalog: ['Baka ito? 🤔 Sinabi mo sa akin: {memory}'],
+      ZoeLanguage.both: ['Baka ito? 🤔 Sabi mo sa akin: {memory}'],
     },
     ZoeSituation.memoryOff: {
       ZoeLanguage.english: [

@@ -16,7 +16,9 @@ import 'package:zoe_remind/rag/retriever.dart';
 ///   hit@1   = tama ang UNANG sagot (ito ang nakikita ng user)
 ///   hit@3   = nasa top 3 ang tama
 ///   honest  = sa mga tanong na WALANG sagot sa data, walang lumabas
-///   wrong   = may lumabas pero mali (ito ang pinakamasama)
+///   wrong   = may lumabas pero mali
+///   baka    = R2: ang unang sagot ay "Baka ito? 🤔" (hindi sigurado)
+///   sureW   = R2: SIGURADO si Zoe pero mali (ito ang pinakamasama)
 ///
 /// Ang [BenchFloor] ay ang baseline. Bawat step (R1, R2…) ay hindi dapat
 /// bumaba rito. Kapag tumaas sa isang step → itaas ang floor sa parehong commit.
@@ -26,15 +28,20 @@ import 'package:zoe_remind/rag/retriever.dart';
 class BenchFloor {
   BenchFloor._();
 
-  /// R1 (Stemmer TL + EN + Taglish): 119 / 156 tama sa #1.
-  /// (R0 baseline, repo 7f0f8d8: 100.)
-  static const hit1 = 119;
+  /// R2 (BM25-style + kumpiyansa): 123 / 156 tama sa #1.
+  /// (R1: 119 · R0 baseline, repo 7f0f8d8: 100.)
+  static const hit1 = 123;
 
-  /// R1: 126 / 156 nasa top 3. (R0: 113.)
+  /// R2: 126 / 156 nasa top 3. (R1: 126 · R0: 113.)
   static const hit3 = 126;
 
-  /// R1: 9 / 20 tapat na "wala" (R2 ang aayos nito). (R0: 9.)
+  /// R2: 9 / 20 tapat na "wala". Ang 11 na iba ay "Baka ito? 🤔" na lahat
+  /// (hindi na ipinipilit). (R1: 9 · R0: 9.)
   static const honest = 9;
+
+  /// R2: hanggang ilan lang ang SIGURADO pero mali. Hindi dapat tumaas.
+  /// (R1: 33 — lahat ng sagot noon ay sigurado.)
+  static const maxSureWrong = 1;
 }
 
 /// Isang araw na hindi nagbabago (para sa "bago" na bonus ng Retriever).
@@ -76,15 +83,15 @@ List<RetrievalDoc> _retrievalDocs() {
   return out;
 }
 
-/// Top 3 na key para sa tanong (walang laman = walang nahanap).
-List<String> _answer(String question, List<RetrievalDoc> docs) {
+/// Top 3 na sagot sa tanong (walang laman = walang nahanap).
+/// Ang [docs] ay LAHAT ng note + memory, kaya walang CorpusStats (eksakto ang IDF).
+List<RetrievalHit> _answer(String question, List<RetrievalDoc> docs) {
   final terms = QueryTerms.parse(ChatRouter.clean(question));
   if (terms.isEmpty) return const [];
-  return Retriever.rank(terms, docs, now: _now)
-      .take(3)
-      .map((h) => benchDocs[h.doc.id - 1].key)
-      .toList();
+  return Retriever.rank(terms, docs, now: _now).take(3).toList();
 }
+
+String _key(RetrievalHit h) => benchDocs[h.doc.id - 1].key;
 
 class _Score {
   int n = 0;
@@ -94,9 +101,17 @@ class _Score {
   int noAnswer = 0;
   int honest = 0;
   int wrong = 0;
+  int maybe = 0;
+  int sureWrong = 0;
 
-  void add(BenchCase c, List<String> got) {
+  void add(BenchCase c, List<RetrievalHit> hits) {
+    final got = hits.map(_key).toList();
     n++;
+    if (hits.isNotEmpty) {
+      final right = c.expect.contains(got.first);
+      if (!hits.first.isSure) maybe++;
+      if (hits.first.isSure && !right) sureWrong++;
+    }
     if (c.expect.isEmpty) {
       noAnswer++;
       if (got.isEmpty) {
@@ -144,7 +159,7 @@ void main() {
     });
   });
 
-  test('R0 benchmark — score (hindi dapat bumaba sa BenchFloor)', () {
+  test('RAG benchmark — score (hindi dapat bumaba sa BenchFloor)', () {
     final docs = _retrievalDocs();
     final all = _Score();
     final byCat = {for (final c in BenchCategory.values) c: _Score()};
@@ -152,26 +167,29 @@ void main() {
     final fails = <String>[];
 
     for (final c in benchCases) {
-      final got = _answer(c.question, docs);
-      all.add(c, got);
-      byCat[c.category]!.add(c, got);
-      byLang[c.lang]!.add(c, got);
+      final hits = _answer(c.question, docs);
+      final got = hits.map(_key).toList();
+      all.add(c, hits);
+      byCat[c.category]!.add(c, hits);
+      byLang[c.lang]!.add(c, hits);
       final ok = c.expect.isEmpty ? got.isEmpty : got.isNotEmpty && c.expect.contains(got.first);
       if (!ok) {
         final want = c.expect.isEmpty ? '(wala)' : c.expect.join(' | ');
         final top = got.isEmpty ? '(wala)' : got.join(', ');
-        fails.add('  [${c.category.name}] "${c.question}"\n      gusto: $want · lumabas: $top');
+        final how = hits.isEmpty ? '' : (hits.first.isSure ? ' · SIGURADO' : ' · baka');
+        fails.add('  [${c.category.name}] "${c.question}"\n      gusto: $want · lumabas: $top$how');
       }
     }
 
     String row(String name, _Score s) => '${name.padRight(12)} ${'${s.n}'.padLeft(4)} '
         '${_pct(s.hit1, s.answerable)}  ${_pct(s.hit3, s.answerable)}  '
-        '${_pct(s.honest, s.noAnswer)}  ${'${s.wrong}'.padLeft(5)}';
+        '${_pct(s.honest, s.noAnswer)}  ${'${s.wrong}'.padLeft(5)}  '
+        '${'${s.maybe}'.padLeft(4)}  ${'${s.sureWrong}'.padLeft(5)}';
 
     final out = StringBuffer()
       ..writeln('')
       ..writeln('══════════ Zoe RAG bench ══════════')
-      ..writeln('bucket          n   hit@1   hit@3  honest  wrong')
+      ..writeln('bucket          n   hit@1   hit@3  honest  wrong  baka  sureW')
       ..writeln(row('LAHAT', all))
       ..writeln('');
     byCat.forEach((k, v) => out.writeln(row(k.name, v)));
@@ -180,8 +198,10 @@ void main() {
     out
       ..writeln('')
       ..writeln('Raw: hit@1 ${all.hit1}/${all.answerable} · hit@3 ${all.hit3}/${all.answerable} · '
-          'honest ${all.honest}/${all.noAnswer} · wrong ${all.wrong}')
-      ..writeln('Floor: hit@1 ${BenchFloor.hit1} · hit@3 ${BenchFloor.hit3} · honest ${BenchFloor.honest}')
+          'honest ${all.honest}/${all.noAnswer} · wrong ${all.wrong} · '
+          'baka ${all.maybe} · sureWrong ${all.sureWrong}')
+      ..writeln('Floor: hit@1 ${BenchFloor.hit1} · hit@3 ${BenchFloor.hit3} · '
+          'honest ${BenchFloor.honest} · sureWrong ≤ ${BenchFloor.maxSureWrong}')
       ..writeln('')
       ..writeln('Mali / walang nahanap (${fails.length}):')
       ..writeln(fails.join('\n'));
@@ -191,6 +211,8 @@ void main() {
     expect(all.hit1, greaterThanOrEqualTo(BenchFloor.hit1), reason: 'bumaba ang hit@1');
     expect(all.hit3, greaterThanOrEqualTo(BenchFloor.hit3), reason: 'bumaba ang hit@3');
     expect(all.honest, greaterThanOrEqualTo(BenchFloor.honest), reason: 'bumaba ang honest');
+    expect(all.sureWrong, lessThanOrEqualTo(BenchFloor.maxSureWrong),
+        reason: 'dumami ang sigurado pero mali');
   });
 }
 

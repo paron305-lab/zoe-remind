@@ -1,6 +1,17 @@
 /// Saan galing ang nahanap.
 enum RetrievalSource { note, memory }
 
+/// R2: gaano kasigurado si Zoe sa sagot.
+enum RetrievalConfidence {
+  /// Halos lahat ng salita ng tanong ay tumama → sinasagot nang diretso
+  /// ("Ito ang nakita ko sa notes mo: …").
+  strong,
+
+  /// May tumama pero kulang, o halos magkapantay ang dalawang sagot →
+  /// "Baka ito? 🤔 …". Ipinapakita pa rin ang note, pero hindi ipinipilit.
+  maybe,
+}
+
 /// Isang note o memory na pwedeng isagot (galing sa SearchRepository).
 class RetrievalDoc {
   const RetrievalDoc({
@@ -64,17 +75,47 @@ class RetrievalDoc {
   }
 }
 
-/// Isang resulta ng Retriever, may score.
+/// R2: laki ng lahat ng notes + memories, para sa IDF ng Retriever
+/// (bihirang salita = mas mabigat).
+///
+///   [docCount] = ilang notes (+ memories kung ON) lahat.
+///   [docFreq]  = ilan ang may bawat salita, kapareho ng order ng TermGroup.
+///                Walang laman = hindi alam (kukuwentahin mula sa mga kandidato).
+///
+/// Galing sa SearchRepository.corpusStats (COUNT lang, FTS4).
+class CorpusStats {
+  const CorpusStats({required this.docCount, this.docFreq = const []});
+
+  /// Hindi alam ang laki (walang FTS4, o fake na repository sa test):
+  /// mga kandidato lang ang alam, kaya tinatantiya ng Retriever.
+  static const unknown = CorpusStats(docCount: 0);
+
+  final int docCount;
+  final List<int> docFreq;
+
+  bool get isUnknown => docCount <= 0;
+
+  @override
+  String toString() => 'CorpusStats(N=$docCount, df=$docFreq)';
+}
+
+/// Isang resulta ng Retriever, may score at kumpiyansa.
 class RetrievalHit {
   const RetrievalHit({
     required this.doc,
     required this.score,
     required this.matched,
     required this.matchedInTitle,
+    this.coverage = 1,
+    this.confidence = RetrievalConfidence.strong,
   });
 
   final RetrievalDoc doc;
-  final int score;
+
+  /// R2: BM25-style (IDF × dalas, may title / magkatabi / bago / pinned).
+  /// Para sa pag-aayos lang ng pagkakasunod — hindi pare-pareho ang laki
+  /// sa bawat tanong.
+  final double score;
 
   /// Ilang salita ng tanong ang tumama.
   final int matched;
@@ -82,6 +123,16 @@ class RetrievalHit {
   /// Ilan doon ang nasa title.
   final int matchedInTitle;
 
+  /// R2: 0–1 — gaano kalaking bahagi ng tanong (ayon sa bigat ng salita) ang
+  /// nasa doc. 1 = lahat ng salita tumama.
+  final double coverage;
+
+  /// R2: strong → diretsong sagot · maybe → "Baka ito? 🤔".
+  final RetrievalConfidence confidence;
+
+  bool get isSure => confidence == RetrievalConfidence.strong;
+
   @override
-  String toString() => '${doc.source.name}#${doc.id} "${doc.title}" score $score';
+  String toString() => '${doc.source.name}#${doc.id} "${doc.title}" '
+      'score ${score.toStringAsFixed(2)} · ${(coverage * 100).round()}% · ${confidence.name}';
 }

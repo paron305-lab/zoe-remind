@@ -693,6 +693,10 @@ class ChatPreviewBrain {
   /// Ang note / memory mismo ang ipinapakita — walang iniimbento si Zoe.
   /// Rows = mga source (hanggang 3), napipindot para buksan.
   ///
+  /// R2: sigurado → "Ito ang nakita ko…" · hindi sigurado → "Baka ito? 🤔 …"
+  /// (parehong source at rows; ang linya lang ang nag-iiba) · wala → tapat
+  /// na "wala akong nakita".
+  ///
   /// [words] (B6) = mga salitang pinili ni Qwen MULA sa mensahe ("gamot, mama").
   /// Iyon ang hahanapin; kapag wala, ang buong tanong ulit.
   Future<ChatEntry> _searchNotes(String lower, {List<String> words = const []}) async {
@@ -720,15 +724,20 @@ class ChatPreviewBrain {
       );
     }
 
-    final best = hits.first.doc;
+    final top = hits.first;
+    final best = top.doc;
     final shown = best.text.length > 300 ? '${best.text.substring(0, 300)}…' : best.text;
+    final ZoeSituation line;
+    if (best.isMemory) {
+      line = top.isSure ? ZoeSituation.memoryFound : ZoeSituation.memoryMaybe;
+    } else {
+      line = top.isSure ? ZoeSituation.noteFound : ZoeSituation.noteMaybe;
+    }
     return AnswerEntry(
       assumption: best.isMemory
           ? _t('From what you told me', 'Galing sa sinabi mo sa akin')
           : _t('From your notes', 'Galing sa notes mo'),
-      text: best.isMemory
-          ? _say(ZoeSituation.memoryFound, {'memory': shown})
-          : _say(ZoeSituation.noteFound, {'note': shown}),
+      text: _say(line, best.isMemory ? {'memory': shown} : {'note': shown}),
       rows: [for (final h in hits) _sourceRow(h.doc)],
     );
   }

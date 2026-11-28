@@ -141,10 +141,12 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
               Text('salita: ${_terms.isEmpty ? '—' : _terms}', style: const TextStyle(fontSize: 12)),
               if (_hits!.isEmpty)
                 const Text('Walang nahanap', style: TextStyle(fontSize: 13, color: _coral)),
+              // R2: score (BM25-style) · coverage · sigurado o "baka".
               for (final h in _hits!)
                 Text(
-                  '${h.doc.isMemory ? '💜' : '📝'} ${h.doc.title} · score ${h.score} '
-                  '(${h.matched} salita)',
+                  '${h.doc.isMemory ? '💜' : '📝'} ${h.doc.title} · '
+                  'score ${h.score.toStringAsFixed(2)} · ${(h.coverage * 100).round()}% · '
+                  '${h.isSure ? 'sigurado' : 'baka 🤔'} (${h.matched} salita)',
                   style: const TextStyle(fontSize: 13),
                 ),
             ],
