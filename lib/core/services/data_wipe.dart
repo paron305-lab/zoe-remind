@@ -8,6 +8,8 @@ import 'package:zoe_remind/database/repositories/wipe_repository.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_controller.dart';
 import 'package:zoe_remind/features/companion/controllers/mood_log.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
+import 'package:zoe_remind/rag/rag_learning.dart';
+import 'package:zoe_remind/rag/search_misses.dart';
 
 /// Iisang "Burahin lahat ng data" ng buong app.
 /// Lahat ng button na nagbubura ng LAHAT ay dapat dito dumaan.
@@ -16,7 +18,8 @@ import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.da
 ///   1. Patayin ang lahat ng naka-schedule na alarm (para walang tumunog
 ///      para sa reminder na wala na).
 ///   2. Burahin ang database (WipeRepository — isang transaction + VACUUM).
-///   3. I-reset ang nasa memory ng app (mood ni Zoe, mood log).
+///   3. I-reset ang nasa memory ng app (mood ni Zoe, mood log, R6: ang
+///      naka-cache na natutunan ni Zoe + "Hindi nahanap" sa RAM).
 ///   4. Sabihan ang mga screen na mag-refresh.
 ///
 /// Hindi binubura: pangalan, language, settings ng app, na-download na model.
@@ -46,6 +49,8 @@ class DataWipe {
       await _wipe.wipeUserData();
       await MoodController.instance.reset();
       await MoodLog.instance.clearAll();
+      RagLearning.instance.reset();
+      SearchMisses.clear();
       _notifyScreens();
       return true;
     } catch (e) {

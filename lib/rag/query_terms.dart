@@ -210,7 +210,15 @@ class QueryTerms {
   /// Ang mga salitang hahanapin, walang ulit, hanggang [maxTerms].
   /// May tuldik ("niño") → kasama rin ang walang tuldik ("nino").
   /// Walang ulit sa UGAT din: "shoes shoe" → isang grupo lang.
-  static List<TermGroup> parse(String question) {
+  ///
+  /// R6: [learned] = mga salitang natutunan ni Zoe sa phone (RagLearning:
+  /// salita o ugat → kapareho). "net" → ["wifi"] → ang "net" ay tumatama
+  /// rin sa "wifi" (at sa synonyms ng wifi: "wi fi", "internet"…).
+  /// Synonym ang bigat (hindi salita mismo). Walang laman = gaya ng dati.
+  static List<TermGroup> parse(
+    String question, {
+    Map<String, List<String>> learned = const {},
+  }) {
     final seen = <String>{};
     final groups = <TermGroup>[];
     for (final w in rawTokens(question)) {
@@ -218,7 +226,7 @@ class QueryTerms {
       if (key.length < 2 || stopWords.contains(key) || Stemmer.isBareAffix(key)) continue;
       final stem = Stemmer.stem(key);
       if (stopWords.contains(stem) || !seen.add(stem)) continue;
-      final (alts, direct) = _altsFor(w, key, stem);
+      final (alts, direct) = _altsFor(w, key, stem, learned);
       groups.add(TermGroup(w, alts, direct: direct));
       if (groups.length == maxTerms) break;
     }
@@ -234,7 +242,12 @@ class QueryTerms {
   }
 
   /// Ang mga alt + kung ilan sa unahan ang galing sa salita mismo (R2).
-  static (List<String>, int) _altsFor(String word, String key, String stem) {
+  static (List<String>, int) _altsFor(
+    String word,
+    String key,
+    String stem,
+    Map<String, List<String>> learned,
+  ) {
     // Synonym ng salita mismo; kung wala, ng ugat ("medicines" → medicine → gamot).
     var gkey = key;
     var group = _groupOf(key);
@@ -254,6 +267,19 @@ class QueryTerms {
         final b = bare(w);
         if (b == gkey || b == key || out.any((a) => bare(a) == b)) continue;
         out.add(w);
+      }
+    }
+    // R6: natutunang salita + ang synonyms nito ("net" → wifi, wi fi, internet…).
+    final extra = learned[key] ?? learned[stem];
+    if (extra != null) {
+      for (final w in extra) {
+        final g = _groupOf(w);
+        final self = g != null && g.contains('=$w') ? '=$w' : w;
+        for (final alt in [self, ...?g]) {
+          final b = bare(alt);
+          if (b == key || out.any((a) => bare(a) == b)) continue;
+          out.add(alt);
+        }
       }
     }
     return (out, direct);

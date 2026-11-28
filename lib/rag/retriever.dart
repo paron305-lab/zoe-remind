@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:zoe_remind/database/repositories/search_repository.dart';
 import 'package:zoe_remind/rag/query_terms.dart';
+import 'package:zoe_remind/rag/rag_learning.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/search_scope.dart';
 import 'package:zoe_remind/rag/stemmer.dart';
@@ -42,15 +43,30 @@ import 'package:zoe_remind/rag/stemmer.dart';
 ///       < [minCoverage]     → hindi isasama
 ///     Halos magkapantay ang #1 at #2 → maybe din.
 ///
+/// R6 — natututo sa phone (RagLearning):
+///   • natutunang salita ("net" ↔ "wifi") → idinadagdag bilang synonym
+///     (QueryTerms.parse `learned`).
+///   • feedback ("oo" / binuksan = +, "hindi yan" = −) → maliit na dagdag /
+///     bawas sa multiplier ng score ([rank] `boosts`, ±0.2 lang). Hindi
+///     nagbabago ang coverage, kaya hindi nagiging "sigurado" ang maling sagot.
+///   Ang bench (pure [rank]) ay walang learning — pareho pa rin ang score.
+///
 /// Mga numero: galing sa R2 bench (test/rag/rag_bench_test.dart) —
 /// tingnan ang claude/r2-ranking-handoff.md bago baguhin.
 class Retriever {
-  Retriever({SearchRepository? repo, DateTime Function()? clock})
+  /// [learning] = null at walang [repo] → [RagLearning.instance] (ang app).
+  /// May [repo] (fake sa test) → walang learning maliban kung ipinasa.
+  Retriever({SearchRepository? repo, DateTime Function()? clock, RagLearning? learning})
       : _repo = repo ?? SearchRepository(),
-        _clock = clock ?? DateTime.now;
+        _clock = clock ?? DateTime.now,
+        _learning = learning ?? (repo == null ? RagLearning.instance : null);
 
   final SearchRepository _repo;
   final DateTime Function() _clock;
+  final RagLearning? _learning;
+
+  /// R6: ang learning na ginagamit (para sa chat brain). null = wala.
+  RagLearning? get learning => _learning;
 
   /// coverage ≥ ito → sigurado.
   static const strongCoverage = 0.70;
@@ -94,7 +110,10 @@ class Retriever {
     bool includeMemories = true,
     int limit = 3,
   }) async {
-    final scope = SearchScope.of(question);
+    // R6: natutunang salita + feedback (pumalya → walang laman, gaya ng dati).
+    final learning = _learning;
+    final learned = learning == null ? LearnedSnapshot.empty : await learning.snapshot();
+    final scope = SearchScope.of(question, learned: learned.synonyms);
     final terms = scope.all;
     if (terms.isEmpty) return const [];
     final docs = await _repo.candidates(terms, includeMemories: includeMemories);
@@ -113,6 +132,7 @@ class Retriever {
       now: _clock(),
       stats: stats ?? CorpusStats.unknown,
       kindTotals: _repo.itemTotals,
+      boosts: learned.boosts,
     ).take(limit).toList();
   }
 
@@ -125,12 +145,15 @@ class Retriever {
   /// Kapag may [stats] (totoong search, kandidato lang ang [docs]):
   /// [kindTotals] = ilan lahat ang reminders / tasks (para sa IDF sa loob ng
   /// uri). Walang alam → tinatantiya.
+  ///
+  /// [boosts] (R6) = feedback bawat item ('note#5' → +0.05), tingnan ang [rank].
   static List<RetrievalHit> rankFor(
     SearchScope scope,
     Iterable<RetrievalDoc> docs, {
     required DateTime now,
     CorpusStats? stats,
     Map<RetrievalSource, int> kindTotals = const {},
+    Map<String, double> boosts = const {},
   }) {
     final list = docs.toList();
     final kinds = scope.kinds;
@@ -142,11 +165,11 @@ class Retriever {
           final n = kinds.fold<int>(0, (a, k) => a + (kindTotals[k] ?? 0));
           subStats = n > 0 ? CorpusStats(docCount: n) : CorpusStats.unknown;
         }
-        final hits = rank(scope.topic, sub, now: now, stats: subStats);
+        final hits = rank(scope.topic, sub, now: now, stats: subStats, boosts: boosts);
         if (hits.isNotEmpty) return hits;
       }
     }
-    return rank(scope.all, list, now: now, stats: stats);
+    return rank(scope.all, list, now: now, stats: stats, boosts: boosts);
   }
 
   /// Pure scoring (walang database) — nate-test sa test/rag/retriever_test.dart
@@ -157,11 +180,16 @@ class Retriever {
   ///
   /// Tinatanggal ang mahina: coverage < [minCoverage], o kulang ng 2+ salita
   /// kumpara sa pinakamagaling (kailangan ≥ pinakamarami − 1, gaya ng dati).
+  ///
+  /// [boosts] (R6) = 'note#5' → dagdag sa multiplier ng score (RagLearning:
+  /// "oo" / binuksan = +, "hindi yan" = −). Coverage at kumpiyansa = hindi
+  /// ginagalaw (maliban sa "halos magkapantay" na check, na score ang tinitingnan).
   static List<RetrievalHit> rank(
     List<TermGroup> terms,
     Iterable<RetrievalDoc> docs, {
     required DateTime now,
     CorpusStats? stats,
+    Map<String, double> boosts = const {},
   }) {
     final list = docs.toList();
     if (terms.isEmpty || list.isEmpty) return [];
@@ -250,6 +278,8 @@ class Retriever {
       if (d.pinned) boost += 0.1;
       boost += 0.05 * recencyBonus(d.updatedAt, now);
       if (d.isMemory) boost += 0.05 * math.max(-2, math.min(2, d.importance - 3));
+      // R6: feedback ng user sa item na ito.
+      boost += boosts[RagLearning.keyOf(d)] ?? 0.0;
       score *= boost;
 
       scored.add(_Scored(d, score, matched, inTitle, matchedWeight / total));

@@ -35,6 +35,7 @@ import 'package:zoe_remind/memory/habit_rules.dart';
 import 'package:zoe_remind/memory/memory_recall.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
 import 'package:zoe_remind/rag/history_query.dart';
+import 'package:zoe_remind/rag/rag_learning.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/rag_session.dart';
 import 'package:zoe_remind/rag/retriever.dart';
@@ -75,6 +76,11 @@ import 'package:zoe_remind/rag/snippet.dart';
 ///        "eh kay papa?" → "gamot papa" · "yung isa pa" → susunod na nahanap
 ///        "hindi yan" → iba na lang / tapat na "wala na" · "buksan mo" → bubuksan
 ///        "oo" / "yan nga" → "Ayun! 👍".
+///      R6: natututo sa phone (RagLearning → search_log, learned_terms,
+///        search_feedback): bawat paghahanap ay itinatala; "oo" / "buksan mo" /
+///        pinindot = tama, "hindi yan" = mali (maliit na boost sa susunod);
+///        pumalya → nag-rephrase → tumama = natututong salita ("net" ↔ "wifi",
+///        ginagamit pagkatapos ng 2 beses). Memory na nagamit → +1 use_count.
 ///  10. Memories (B5): "tandaan mo na mas gusto ko ng morning reminders" →
 ///      memory card (Accept muna). OFF ang long-term memory → note card na lang.
 ///      Data ("tandaan mo, wifi password ay…") → note pa rin (MemoryRules).
@@ -135,9 +141,14 @@ class ChatPreviewBrain {
     Future<bool> Function()? helpAsked,
     Future<void> Function()? markHelpAsked,
     Future<List<String>> Function()? memories,
+    RagLearning? learning,
   })  : _reminders = reminders ?? ReminderRepository(),
         _tasks = tasks ?? TaskRepository(),
         _retriever = retriever ?? Retriever(),
+        // R6: ang app → RagLearning.instance. Fake na Retriever (test) → ang
+        // learning nito, o wala.
+        _learning = learning ??
+            (retriever == null ? RagLearning.instance : (retriever.learning ?? RagLearning.disabled)),
         _memoryOn = memoryOn ?? SettingsRepository().isLongTermMemoryOn,
         _classifier = classifier ?? IntentClassifier(),
         _moodOf = mood ?? (() => MoodNow.current),
@@ -165,6 +176,9 @@ class ChatPreviewBrain {
 
   /// RAG: hinahanap ang sagot sa notes + memories.
   final Retriever _retriever;
+
+  /// R6: natututo sa phone (search_log, natutunang salita, feedback).
+  final RagLearning _learning;
 
   /// ON ba ang long-term memory? OFF → hindi binabasa / sine-save ang memories.
   final Future<bool> Function() _memoryOn;
@@ -743,6 +757,10 @@ class ChatPreviewBrain {
     return _searchResult(query, hits, miss: lower, searched: words);
   }
 
+  /// R6: may item bang may [word]? (Para hindi matuto ng salitang kilala na.)
+  Future<bool> _isKnownWord(String word) async =>
+      (await _find(word, await _memoryOnSafe())).isNotEmpty;
+
   /// Retriever; pumalya → walang nahanap (hindi nagka-crash ang chat).
   Future<List<RetrievalHit>> _find(String q, bool useMemories) async {
     try {
@@ -756,14 +774,17 @@ class ChatPreviewBrain {
   /// [miss] = itatala sa "Hindi nahanap" (Developer) kapag walang nahanap.
   /// [searched] = mga salitang ipapakita sa chip ("Hinanap…: gamot, mama").
   /// [swapped] (R5) = galing sa "eh kay papa?" → ipinapakita ang hinanap.
-  ChatEntry _searchResult(
+  /// R6: itinatala sa search_log; tumama nang sigurado pagkatapos pumalya →
+  /// baka may bagong salitang matututunan (RagLearning).
+  Future<ChatEntry> _searchResult(
     String query,
     List<RetrievalHit> hits, {
     required String miss,
     List<String> searched = const [],
     bool swapped = false,
-  }) {
+  }) async {
     _session = RagSession(query: query, hits: hits, at: _now());
+    await _learning.searched(question: miss, query: query, hits: hits, isKnown: _isKnownWord);
 
     if (hits.isEmpty) {
       // B6: para makita sa Developer kung anong tanong ang pumapalya (RAM lang).
@@ -877,9 +898,11 @@ class ChatPreviewBrain {
     final follow = RagFollowUp.read(text);
     if (follow == null) {
       // "oo" / "yan nga" / "tama" pagkatapos ng sagot → "Ayun! 👍".
-      // (R6: ise-save ito bilang "tama ang sagot".)
+      // R6: sine-save bilang "tama ang sagot" (feedback +).
       if (s.hasHits && ContextReplies.isYes(text)) {
         _session = s;
+        final cur = s.current;
+        if (cur != null) await _learning.confirmed(RagLearning.keyOf(cur.doc));
         return [TextEntry(fromZoe: true, text: _say(ZoeSituation.ragConfirmed))];
       }
       return null;
@@ -890,13 +913,13 @@ class ChatPreviewBrain {
           _session = s;
           return [TextEntry(fromZoe: true, text: _say(ZoeSituation.ragNothingToOpen))];
         }
-        return [_nextAnswer(s, rejected: false)];
+        return [await _nextAnswer(s, rejected: false)];
       case FollowUpKind.reject:
         // "hindi" sa "wala akong nakita" → hindi tungkol sa sagot; normal na reply.
         if (!s.hasHits) return null;
-        return [_nextAnswer(s, rejected: true)];
+        return [await _nextAnswer(s, rejected: true)];
       case FollowUpKind.open:
-        return [_openCurrent(s)];
+        return [await _openCurrent(s)];
       case FollowUpKind.swap:
         // "salamat naman", "ayos naman", "kumusta si mama?" → hindi paghahanap.
         // "eh yung task?" → askKind sa router ("task" lang) — pero kung walang
@@ -914,9 +937,13 @@ class ChatPreviewBrain {
 
   /// "yung isa pa" / "hindi yan" → ang susunod na nahanap (hindi pa tinanggihan).
   /// Wala na → tapat na "wala na akong ibang nakita".
-  ChatEntry _nextAnswer(RagSession s, {required bool rejected}) {
+  /// R6: "hindi yan" → sine-save bilang mali (feedback −).
+  Future<ChatEntry> _nextAnswer(RagSession s, {required bool rejected}) async {
     final current = s.current;
-    if (rejected && current != null) s.rejected.add(RagSession.keyOf(current.doc));
+    if (rejected && current != null) {
+      s.rejected.add(RagSession.keyOf(current.doc));
+      await _learning.rejected(RagLearning.keyOf(current.doc), query: s.query);
+    }
     _session = s;
     final next = s.nextIndex();
     if (next == null) {
@@ -927,10 +954,12 @@ class ChatPreviewBrain {
     }
     s.shown = next;
     final (pos, total) = s.positionOf(next);
+    final rows = s.remainingFrom(next).take(3).toList();
+    _learning.showing(rows);
     return _answerFor(
       s.hits[next],
       s.query,
-      s.remainingFrom(next).take(3).toList(),
+      rows,
       forceMaybe: rejected,
       label: _t('Another match ($pos of $total)', 'Iba pang nakita ($pos sa $total)'),
     );
@@ -938,13 +967,15 @@ class ChatPreviewBrain {
 
   /// "buksan mo" → ang ipinapakita ngayon. Note / reminder / task → route para
   /// sa screen ([takeOpen]). Memory → walang page, ang buong sinabi na lang.
-  ChatEntry _openCurrent(RagSession s) {
+  /// R6: sine-save bilang tama (feedback +).
+  Future<ChatEntry> _openCurrent(RagSession s) async {
     _session = s;
     final hit = s.current;
     if (hit == null) {
       return TextEntry(fromZoe: true, text: _say(ZoeSituation.ragNothingToOpen));
     }
     final d = hit.doc;
+    await _learning.opened(RagLearning.keyOf(d));
     if (d.isMemory) {
       return TextEntry(fromZoe: true, text: _say(ZoeSituation.ragOpenMemory, {'memory': d.text}));
     }
@@ -1091,10 +1122,15 @@ class ChatPreviewBrain {
   }
 
   /// Memory Recall (code, walang Qwen). OFF ang long-term memory / pumalya → null.
+  /// R6: kasama ang natutunang salita (iisang vocabulary sa search), at ang
+  /// memory na naalala ay +1 use_count (mas malakas).
   Future<RecallHit?> _recall(String lower) async {
     try {
       if (!await _memoryOnSafe()) return null;
-      return MemoryRecall.check(lower, await _memoriesOf());
+      final learned = await _learning.snapshot();
+      final hit = MemoryRecall.check(lower, await _memoriesOf(), learned: learned.synonyms);
+      if (hit != null) await _learning.memoryUsed(content: hit.fact.memory);
+      return hit;
     } catch (_) {
       return null;
     }
@@ -1390,6 +1426,7 @@ class ChatPreviewBrain {
   void resetSession() {
     _session = null;
     _openRoute = null;
+    _learning.resetSession(); // R6: RAM lang (hindi ang natutunan)
   }
 
   /// R5: ang route na dapat buksan pagkatapos ng sagot ("buksan mo"), o null.

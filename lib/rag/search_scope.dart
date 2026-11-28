@@ -76,8 +76,9 @@ class SearchScope {
     'bes', 'besh', 'sis', 'bro', 'pre', 'tol', 'pls',
   };
 
-  factory SearchScope.of(String question) {
-    final all = QueryTerms.parse(question);
+  /// [learned] (R6) = natutunang salita ni Zoe (tingnan ang QueryTerms.parse).
+  factory SearchScope.of(String question, {Map<String, List<String>> learned = const {}}) {
+    final all = QueryTerms.parse(question, learned: learned);
     final kinds = <RetrievalSource>{};
     for (final w in QueryTerms.rawTokens(question)) {
       final k = kindWords[QueryTerms.fold(w)];

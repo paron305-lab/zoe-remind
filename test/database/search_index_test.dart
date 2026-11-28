@@ -103,11 +103,11 @@ Future<void> main() async {
     );
     await old.close();
 
-    db = await ZoeDatabase.instance.database; // v12 → v15 + onOpen
+    db = await ZoeDatabase.instance.database; // v12 → v16 + onOpen
   });
 
-  test('upgrade v12 → v15: bumubukas kahit walang FTS4, at nahahanap pa rin ang notes', () async {
-    expect(await db.getVersion(), 15);
+  test('upgrade v12 → v16: bumubukas kahit walang FTS4, at nahahanap pa rin ang notes', () async {
+    expect(await db.getVersion(), 16);
     expect(ZoeDatabase.instance.searchReady, fts4);
     if (!fts4) expect(ZoeDatabase.instance.searchError, contains('fts4'));
     // FTS4 o LIKE — pareho dapat ang sagot.
@@ -116,13 +116,26 @@ Future<void> main() async {
     expect(await Retriever().search('ano pin ko'), isEmpty); // hindi "shopping"
   });
 
-  test('upgrade v12 → v15: lumang memory ay "general" (Level 3 kind + value)', () async {
+  test('upgrade v12 → v16: lumang memory ay "general" (Level 3 kind + value)', () async {
     final rows = await db.query('memories', columns: ['kind', 'value']);
     expect(rows.single['kind'], 'general');
     expect(rows.single['value'], isNull);
   });
 
-  test('upgrade v12 → v15 (R1): napunan ang search_stems ng lumang notes / memories', () async {
+  test('upgrade v12 → v16 (R6): use_count = 0 ang lumang memory, may learning tables', () async {
+    final rows = await db.query('memories', columns: ['use_count', 'last_used_at']);
+    expect(rows.single['use_count'], 0);
+    expect(rows.single['last_used_at'], isNull);
+    for (final t in [
+      StorageConstants.searchLogTable,
+      StorageConstants.learnedTermsTable,
+      StorageConstants.searchFeedbackTable,
+    ]) {
+      expect(await count(t), 0, reason: t);
+    }
+  });
+
+  test('upgrade v12 → v16 (R1): napunan ang search_stems ng lumang notes / memories', () async {
     final notes = await db.query('notes', columns: ['id', 'search_stems'], orderBy: 'id');
     expect(notes.map((r) => r['search_stems']).toList(), ['', 'shop']); // "Shopping list" → shop
     final mem = await db.query('memories', columns: ['search_stems']);
@@ -149,9 +162,9 @@ Future<void> main() async {
     await repo.delete(id);
   });
 
-  test('upgrade v12 → v15: gumagana ang FTS4 at kasama ang lumang notes', () async {
+  test('upgrade v12 → v16: gumagana ang FTS4 at kasama ang lumang notes', () async {
     expect(ZoeDatabase.instance.searchReady, isTrue, reason: ZoeDatabase.instance.searchError);
-    expect(await db.getVersion(), 15);
+    expect(await db.getVersion(), 16);
     expect(await count(StorageConstants.notesFtsTable), 2);
     expect(await count(StorageConstants.memoriesFtsTable), 1);
     expect(await notesMatching('zoe123'), [1]);

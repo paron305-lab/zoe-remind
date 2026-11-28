@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/chat/widgets/chat_bubbles.dart';
 import 'package:zoe_remind/features/chat/widgets/chat_styles.dart';
 import 'package:zoe_remind/features/home/widgets/home_styles.dart';
+import 'package:zoe_remind/rag/rag_learning.dart';
 import 'package:zoe_remind/rag/snippet.dart';
 
 /// Sagot sa "Ano ginawa ko noong…?" — "📅 Assuming …" chip + text + rows.
@@ -12,6 +15,9 @@ import 'package:zoe_remind/rag/snippet.dart';
 ///
 /// R3: naka-**bold** ang mga salitang tumama sa tanong ([AnswerEntry.bold]),
 /// at may "Buong note →" kapag bahagi lang ng note ang ipinakita.
+///
+/// R6: pinindot ang row / "Buong note →" ng sagot ng search → sine-save bilang
+/// "tama ang sagot" (RagLearning.rowOpened — item lang ng huling search).
 class AnswerCard extends StatelessWidget {
   final AnswerEntry entry;
   const AnswerCard({super.key, required this.entry});
@@ -76,7 +82,7 @@ class _MoreLink extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       borderRadius: BorderRadius.circular(8),
-      onTap: () => context.push(link.route),
+      onTap: () => _open(context, link.route),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Text(
@@ -86,6 +92,12 @@ class _MoreLink extends StatelessWidget {
       ),
     );
   }
+}
+
+/// R6: buksan ang [route] + sabihan ang learning (pinindot = tama ang sagot).
+void _open(BuildContext context, String route) {
+  unawaited(RagLearning.instance.rowOpened(route));
+  unawaited(context.push(route));
 }
 
 /// 📝 kapag galing sa notes, 💜 kapag sa memories, 📅 kapag history / schedule.
@@ -119,7 +131,7 @@ class _AnswerRowTile extends StatelessWidget {
       borderRadius: radius,
       child: InkWell(
         borderRadius: radius,
-        onTap: route == null ? null : () => context.push(route),
+        onTap: route == null ? null : () => _open(context, route),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(

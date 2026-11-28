@@ -10,6 +10,7 @@ import 'package:zoe_remind/database/database.dart';
 ///   reminders, reminder_occurrences,
 ///   notes (+ notes_fts), ai_conversations + ai_messages,
 ///   memories (+ memories_fts), zoe_mood, mood_log,
+///   R6: search_log, learned_terms, search_feedback (natutunan ni Zoe),
 ///   sariling task categories (babalik ang 7 default),
 ///   settings na galing sa gamit ng user (mood log noted, habit suggestions,
 ///   missed scan).
@@ -35,6 +36,10 @@ class WipeRepository {
     StorageConstants.memoriesTable,
     StorageConstants.moodTable,
     StorageConstants.moodLogTable,
+    // R6: natutunan ni Zoe (mga tanong sa chat, salita, feedback).
+    StorageConstants.searchLogTable,
+    StorageConstants.learnedTermsTable,
+    StorageConstants.searchFeedbackTable,
   ];
 
   /// Search index (FTS4). Kusang nabubura ng triggers, pero binubura rin

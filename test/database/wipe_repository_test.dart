@@ -11,6 +11,7 @@ import 'package:zoe_remind/database/repositories/wipe_repository.dart';
 /// hindi ginagalaw ang database sa phone.
 /// Sinisigurado na "Burahin lahat" = wala nang natirang data ng user,
 /// pero nandiyan pa ang pangalan, settings ng app at ang model.
+/// R6: kasama ang search_log, learned_terms at search_feedback.
 void main() {
   const now = '2026-11-23T10:00:00.000';
 
@@ -124,6 +125,28 @@ void main() {
       'day': '2026-11-23',
       'tone': 'tired',
       'count': 2,
+      'updated_at': now,
+    });
+    // R6: natutunan ni Zoe.
+    await db.insert(StorageConstants.searchLogTable, {
+      'question': 'ano pw ng net ko?',
+      'search_query': 'ano pw ng net ko?',
+      'hit_count': 0,
+      'outcome': 'none',
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.insert(StorageConstants.learnedTermsTable, {
+      'term': 'net',
+      'alt': 'wifi',
+      'count': 2,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.insert(StorageConstants.searchFeedbackTable, {
+      'doc_key': 'note#1',
+      'good': 1,
+      'bad': 0,
       'updated_at': now,
     });
   }

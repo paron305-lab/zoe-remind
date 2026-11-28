@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:zoe_remind/core/constants/zoe_language.dart';
+import 'package:zoe_remind/rag/query_terms.dart';
+import 'package:zoe_remind/rag/stemmer.dart';
 
 /// Memory Recall — naaalala ni Zoe ang sinabi mo kapag may kinalaman sa
 /// sinasabi mo NGAYON. Pure (walang database) →
@@ -16,6 +18,10 @@ import 'package:zoe_remind/core/constants/zoe_language.dart';
 ///
 /// Code ang naghahanap (salita sa salita) — walang hula, walang Qwen.
 /// Ang memory MISMO ang sinasabi ni Zoe (ginawang "ka / mo"), hindi iniimbento.
+///
+/// R6 — iisang vocabulary sa RAG: kasama na sa paghahanap sa mensahe ang
+/// UGAT ng salita (Stemmer, gaya ng search) at ang mga salitang natutunan ni
+/// Zoe sa phone (RagLearning `learned`: "shrimpies" → hipon).
 enum RecallKind {
   /// Allergic / hindi kumakain / vegetarian → paalala na mag-ingat.
   avoid,
@@ -205,21 +211,62 @@ class MemoryRecall {
 
   /// Hanapin ang memory na may kinalaman sa [lower] (maliit na titik, malinis).
   /// null = walang tugma, o wala namang dapat sabihin.
-  static RecallHit? check(String lower, Iterable<String> memories) {
+  ///
+  /// [learned] (R6) = natutunang salita (salita o ugat → kapareho), galing sa
+  /// RagLearning — pareho ng ginagamit ng search.
+  static RecallHit? check(
+    String lower,
+    Iterable<String> memories, {
+    Map<String, List<String>> learned = const {},
+  }) {
     if (lower.trim().isEmpty) return null;
     final tokens = _tokens(lower);
-    final text = ' ${tokens.join(' ')} ';
+    final text = ' ${[...tokens, ..._learnedWords(tokens, learned)].join(' ')} ';
+    final stems = _stemsOf(tokens);
     final youKnow = _youKnow.hasMatch(lower);
 
     for (final m in memories) {
       final fact = factOf(m);
       if (fact == null) continue;
-      if (!_mentions(text, fact.keywords)) continue;
+      if (!_mentions(text, fact.keywords) && !_mentionsStem(stems, fact.keywords)) continue;
       if (youKnow) return RecallHit(fact, known: true);
       if (fact.kind == RecallKind.avoid && _avoiding.hasMatch(lower)) continue;
       return RecallHit(fact, known: false);
     }
     return null;
+  }
+
+  /// R6: ugat ng mga salita sa mensahe na iba sa salita mismo (5+ letra lang,
+  /// para hindi magkamali sa maiikling salita).
+  static Set<String> _stemsOf(List<String> tokens) => {
+        for (final t in tokens)
+          if (t.length >= 5 && Stemmer.stem(QueryTerms.fold(t)) != QueryTerms.fold(t))
+            Stemmer.stem(QueryTerms.fold(t)),
+      };
+
+  /// Tumama ba ang ugat ng isang salita sa keyword (4+ letra, isang salita)?
+  static bool _mentionsStem(Set<String> stems, Set<String> keys) {
+    if (stems.isEmpty) return false;
+    for (final k in keys) {
+      if (k.length < 4 || k.contains(' ') || _ambiguous.contains(k)) continue;
+      if (stems.contains(k)) return true;
+    }
+    return false;
+  }
+
+  /// R6: mga natutunang kapareho ng mga salita (o ugat) sa mensahe.
+  static List<String> _learnedWords(List<String> tokens, Map<String, List<String>> learned) {
+    if (learned.isEmpty) return const [];
+    final out = <String>[];
+    for (final t in tokens) {
+      final key = QueryTerms.fold(t);
+      final alts = learned[key] ?? learned[Stemmer.stem(key)];
+      if (alts == null) continue;
+      for (final a in alts) {
+        if (!out.contains(a)) out.add(a);
+      }
+    }
+    return out;
   }
 
   static bool _mentions(String text, Set<String> keys) {

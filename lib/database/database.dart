@@ -39,7 +39,9 @@ class ZoeDatabase {
   /// v15: notes.search_stems + memories.search_stems (R1 Stemmer) — mga ugat
   ///      ng salita ("Binili" → bili), kasama sa FTS4. Pinupuno sa onOpen
   ///      ([_ensureSearchStems]); walang nawawalang data.
-  static const _version = 15;
+  /// v16: R6 learning — search_log, learned_terms, search_feedback (bagong
+  ///      tables) + memories.use_count / last_used_at (lakas ng memory).
+  static const _version = 16;
 
   Future<Database>? _opening;
 
@@ -347,6 +349,13 @@ class ZoeDatabase {
       // pinupunan sa onOpen (_ensureSearchStems), saka ginagawa ulit ang FTS.
       await _addColumnIfMissing(db, StorageConstants.notesTable, 'search_stems', 'TEXT');
       await _addColumnIfMissing(db, StorageConstants.memoriesTable, 'search_stems', 'TEXT');
+    }
+    if (oldVersion < 16) {
+      // R6: ilang beses nagamit ang memory (sagot sa search, Memory Recall,
+      // "oo"). Ang bagong tables (search_log…) ay galing sa _createAllTables.
+      await _addColumnIfMissing(
+          db, StorageConstants.memoriesTable, 'use_count', 'INTEGER NOT NULL DEFAULT 0');
+      await _addColumnIfMissing(db, StorageConstants.memoriesTable, 'last_used_at', 'TEXT');
     }
     // v13: walang column change. Ang notes_fts / memories_fts ay ginagawa
     // at pinupuno sa onOpen (_ensureSearchIndex) — kasama ang lumang notes.
@@ -661,7 +670,9 @@ class ZoeDatabase {
         updated_at TEXT NOT NULL,
         kind TEXT NOT NULL DEFAULT 'general',
         value TEXT,
-        search_stems TEXT
+        search_stems TEXT,
+        use_count INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT
       )
     ''');
 
@@ -698,6 +709,54 @@ class ZoeDatabase {
         count INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (day, tone)
+      )
+    ''');
+
+    // R6 (v16): bawat paghahanap sa chat. question = tanong ng user (malinis),
+    // search_query = ang talagang hinanap, top_key = unang sagot ('note#5'),
+    // outcome = none / shown / confirmed / rejected / opened,
+    // doc_key = item na sinabihan ng "oo" / "hindi yan" / binuksan.
+    // Hanggang 500 rows / 60 araw (SearchLogRepository). Sa phone lang.
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.searchLogTable} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question TEXT NOT NULL,
+        search_query TEXT NOT NULL,
+        hit_count INTEGER NOT NULL DEFAULT 0,
+        top_key TEXT,
+        sure INTEGER NOT NULL DEFAULT 0,
+        outcome TEXT NOT NULL DEFAULT 'shown',
+        doc_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    batch.execute(
+      'CREATE INDEX IF NOT EXISTS idx_search_log_created '
+      'ON ${StorageConstants.searchLogTable}(created_at)',
+    );
+
+    // R6: natutunang salita. Isang row kada pares (term < alt, walang tuldik).
+    // Ginagamit lang kapag count ≥ 2 (RagLearning.minCount).
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.learnedTermsTable} (
+        term TEXT NOT NULL,
+        alt TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (term, alt)
+      )
+    ''');
+
+    // R6: feedback bawat item ('note#5'): good = "oo" / binuksan,
+    // bad = "hindi yan". Maliit na boost lang sa Retriever.
+    batch.execute('''
+      CREATE TABLE IF NOT EXISTS ${StorageConstants.searchFeedbackTable} (
+        doc_key TEXT PRIMARY KEY,
+        good INTEGER NOT NULL DEFAULT 0,
+        bad INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
       )
     ''');
 

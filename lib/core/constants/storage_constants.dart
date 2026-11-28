@@ -20,4 +20,12 @@ class StorageConstants {
   // docid = id sa notes / memories. Pinupuno ng triggers.
   static const notesFtsTable = 'notes_fts';
   static const memoriesFtsTable = 'memories_fts';
+
+  // R6 (v16): natututo si Zoe sa phone. Kasama sa "Burahin lahat".
+  //   search_log      = bawat paghahanap sa chat + ang nangyari ("oo" / "hindi yan")
+  //   learned_terms   = natutunang salita ("net" ↔ "wifi")
+  //   search_feedback = "oo" / binuksan / "hindi yan" bawat item (maliit na boost)
+  static const searchLogTable = 'search_log';
+  static const learnedTermsTable = 'learned_terms';
+  static const searchFeedbackTable = 'search_feedback';
 }

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/rag/query_terms.dart';
+import 'package:zoe_remind/rag/rag_learning.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
 import 'package:zoe_remind/rag/search_scope.dart';
-import 'package:zoe_remind/rag/search_misses.dart';
 
 /// Developer › "Search index (RAG)": gumagana ba ang FTS4 sa phone na ito,
 /// tugma ba ang bilang ng notes / memories sa index, at subukan ang Retriever
@@ -14,6 +14,9 @@ import 'package:zoe_remind/rag/search_misses.dart';
 /// para malaman kung anong synonyms ang idadagdag sa query_terms.dart.
 /// R4: kasama ang reminders (⏰) at tasks (✅) sa resulta, at ipinapakita kung
 /// saan hinanap ("reminder lang" kapag binanggit sa tanong).
+/// R6: "Natutunan ni Zoe" — mga natutunang salita (aktibo ✅ / naghihintay ⏳,
+/// may 🗑 bawat isa), ilang item ang may feedback, at ang mga tanong na walang
+/// nahanap (search_log — naka-save na sa phone, hindi na RAM lang).
 class SearchCheckCard extends StatefulWidget {
   const SearchCheckCard({super.key});
 
@@ -44,9 +47,12 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
     try {
       final hits = await Retriever().search(q, limit: 5);
       if (!mounted) return;
-      final scope = SearchScope.of(q);
+      // R6: kasama ang natutunang salita (gaya ng sa chat).
+      final learned = (await RagLearning.instance.snapshot()).synonyms;
+      if (!mounted) return;
+      final scope = SearchScope.of(q, learned: learned);
       setState(() {
-        _terms = QueryTerms.parse(q).join(', ');
+        _terms = QueryTerms.parse(q, learned: learned).join(', ');
         _scope = scope.isScoped ? '${scope.kinds!.map((k) => k.name).join(' + ')} muna' : 'lahat';
         _hits = hits;
       });
@@ -159,8 +165,8 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
             ],
             const Divider(height: 24),
             ValueListenableBuilder<int>(
-              valueListenable: SearchMisses.changes,
-              builder: (context, _, __) => _misses(),
+              valueListenable: RagLearning.instance.changes,
+              builder: (context, version, __) => _LearningSection(version: version),
             ),
           ],
         ),
@@ -174,44 +180,144 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
         RetrievalSource.reminder => '⏰',
         RetrievalSource.task => '✅',
       };
+}
 
-  /// "Hindi nahanap sa chat" — mga tanong na walang sagot (RAM lang).
-  Widget _misses() {
-    final items = SearchMisses.items;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+/// R6: "Natutunan ni Zoe" — binabasa ang search_log, learned_terms at
+/// search_feedback (RagLearning.instance). Nire-refresh tuwing may bago.
+class _LearningSection extends StatefulWidget {
+  const _LearningSection({required this.version});
+
+  /// RagLearning.changes — nagbabago → load ulit.
+  final int version;
+
+  @override
+  State<_LearningSection> createState() => _LearningSectionState();
+}
+
+class _LearningSectionState extends State<_LearningSection> {
+  static const _mint = Color(0xFF3FBE93);
+  static const _coral = Color(0xFFF0768E);
+
+  late Future<_LearningData> _data = _LearningData.load();
+
+  @override
+  void didUpdateWidget(covariant _LearningSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.version != widget.version) _data = _LearningData.load();
+  }
+
+  Future<void> _clearAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Burahin ang natutunan?'),
+        content: const Text(
+          'Mabubura ang search log, mga natutunang salita at feedback. '
+          'Hindi gagalawin ang notes at memories.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Huwag')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Burahin')),
+        ],
+      ),
+    );
+    if (ok == true) await RagLearning.instance.clearLearning();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_LearningData>(
+      future: _data,
+      builder: (context, snap) {
+        final d = snap.data;
+        if (d == null) return const Text('checking…', style: TextStyle(fontSize: 13));
+        final active = d.terms.where((t) => t.active).toList();
+        final waiting = d.terms.where((t) => !t.active).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                'Hindi nahanap sa chat (${items.length})',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Natutunan ni Zoe (R6)', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                if (!d.isEmpty) TextButton(onPressed: _clearAll, child: const Text('Clear')),
+              ],
             ),
-            if (items.isNotEmpty)
-              TextButton(onPressed: SearchMisses.clear, child: const Text('Clear')),
-          ],
-        ),
-        const Text(
-          'Sa session na ito lang, hindi sine-save. Idagdag sa synonyms '
-          '(query_terms.dart) ang salitang dapat tumama.',
-          style: TextStyle(fontSize: 12),
-        ),
-        if (items.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 4),
-            child: Text('Wala pa — ayos!', style: TextStyle(fontSize: 13, color: _mint)),
-          ),
-        for (final m in items)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              '❓ ${m.question}\n    salita: ${m.terms.isEmpty ? '—' : m.terms}',
+            const Text(
+              'Sa phone lang. Ang salita ay ginagamit pagkatapos ng '
+              '${RagLearning.minCount} beses. Nabubura rin sa "Burahin lahat".',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Salita: ${active.length} aktibo · ${waiting.length} naghihintay  ·  '
+              'Feedback: ${d.feedback.length} item',
               style: const TextStyle(fontSize: 13),
             ),
-          ),
-      ],
+            for (final t in [...active, ...waiting])
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${t.active ? '✅' : '⏳'} ${t.term} ↔ ${t.alt}  ×${t.count}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Burahin',
+                    onPressed: () => RagLearning.instance.forget(t.term, t.alt),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: _coral),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 10),
+            Text(
+              'Hindi nahanap sa chat (${d.misses.length})',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const Text(
+              'Idagdag sa synonyms (query_terms.dart) ang salitang dapat tumama — '
+              'o hayaang matutunan ni Zoe kapag nag-rephrase ka.',
+              style: TextStyle(fontSize: 12),
+            ),
+            if (d.misses.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text('Wala pa — ayos!', style: TextStyle(fontSize: 13, color: _mint)),
+              ),
+            for (final m in d.misses)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '❓ ${m.question}\n    salita: ${_termsOf(m.query)}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+          ],
+        );
+      },
     );
+  }
+
+  static String _termsOf(String query) {
+    final t = QueryTerms.parse(query).join(', ');
+    return t.isEmpty ? '—' : t;
+  }
+}
+
+class _LearningData {
+  const _LearningData(this.terms, this.feedback, this.misses);
+
+  final List<LearnedTerm> terms;
+  final Map<String, DocFeedback> feedback;
+  final List<SearchLogEntry> misses;
+
+  bool get isEmpty => terms.isEmpty && feedback.isEmpty && misses.isEmpty;
+
+  static Future<_LearningData> load() async {
+    final l = RagLearning.instance;
+    return _LearningData(await l.learnedTerms(), await l.feedback(), await l.recentMisses());
   }
 }
