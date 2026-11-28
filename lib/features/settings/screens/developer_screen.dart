@@ -11,6 +11,7 @@ import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_alarm_service.dart';
 import 'package:zoe_remind/features/reminders/services/reminder_permissions.dart';
 import 'package:zoe_remind/features/settings/screens/brain_test_screen.dart';
+import 'package:zoe_remind/features/settings/widgets/context_pack_card.dart';
 import 'package:zoe_remind/features/settings/widgets/search_check_card.dart';
 import 'package:zoe_remind/features/settings/widgets/storage_check_card.dart';
 
@@ -231,6 +232,16 @@ class _DeveloperScreenState extends State<DeveloperScreen> with WidgetsBindingOb
               ),
               const SizedBox(height: 8),
               const StorageCheckCard(),
+              const SizedBox(height: 24),
+
+              _section('10. Context Pack (R7)'),
+              Text(
+                'Ang kodigo na iaabot kay Qwen sa Z2: u (ikaw), m1/m2 (memory na may '
+                'kinalaman), mood, s1 (note / reminder / task). Dapat ✅ ≤ 120 tokens.',
+                style: TextStyle(fontFamily: 'Poppins', color: HomeColors.inkSoft),
+              ),
+              const SizedBox(height: 8),
+              const ContextPackCard(),
             ],
           ),
         ),
