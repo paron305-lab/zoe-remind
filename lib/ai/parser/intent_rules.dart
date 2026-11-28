@@ -230,7 +230,10 @@ class IntentRules {
     _Rule(
         ZoeIntent.searchNotes,
         '$_lead' r"(ano|anong|ano'ng|what|what's|whats|saan|san|nasaan|where|kailan|when"
-        r'|sino|who|magkano|ilan|alin|which)\b(?=.*\b(ko|my|akin|ako)\b)'),
+        r'|sino|who|magkano|ilan|alin|which)\b(?=.*\b(ko|my|akin|ako)\b|.*\b(did|have|had) i\b)'),
+    // "did i pay meralco?", "have i paid the rent?" — tanong tungkol sa nagawa / na-save.
+    // (Ang "did i forget / finish…" ay nasa 8 at 9 na.)
+    _Rule(ZoeIntent.searchNotes, '$_lead(did|have|had) i\\b', questionOnly: true),
     // "anu password ng wifi?" — tanong tungkol sa nakasave na impormasyon, kahit walang "ko".
     _Rule(
         ZoeIntent.searchNotes,

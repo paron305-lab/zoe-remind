@@ -61,6 +61,21 @@ void main() {
     ]);
   });
 
+  test('English na "did I / have I" → hanap sa notes (phone, Nov 28)', () {
+    check(ZoeIntent.searchNotes, [
+      'What shoes did i buy',
+      'where did I buy the batteries?',
+      'when did I pay meralco?',
+      'what did i order online?',
+      'did i buy batteries',
+      'have i paid the rent?',
+    ]);
+    // Nauuna pa rin ang na-miss / natapos.
+    check(ZoeIntent.getMissed, ['did i forget anything?']);
+    check(ZoeIntent.getDone, ['did i finish my report?', 'what did i finish yesterday?']);
+    check(ZoeIntent.unknown, ['did you eat?', 'what should i do now?']);
+  });
+
   test('schedule', () {
     check(ZoeIntent.getToday, [
       'busy ba ako bukas ng hapon?',
