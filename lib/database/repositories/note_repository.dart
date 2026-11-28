@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zoe_remind/core/constants/storage_constants.dart';
 import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/database/models/note.dart';
+import 'package:zoe_remind/rag/query_terms.dart';
 
 /// The only place that reads/writes the notes table.
 /// Zoe Chat (later) also saves notes through here: add(source: zoe).
@@ -26,9 +27,12 @@ class NoteRepository {
   }) async {
     final db = await ZoeDatabase.instance.database;
     final now = _now();
+    final savedTitle = Note.titleFrom(title, content);
     final id = await db.insert(_table, {
-      'title': Note.titleFrom(title, content),
+      'title': savedTitle,
       'content': content.trim(),
+      // R1: mga ugat ng salita para sa search ("Binili" → bili).
+      'search_stems': QueryTerms.searchStems(savedTitle, content.trim()),
       'source': source.name,
       'pinned': pinned ? 1 : 0,
       'created_at': now,
@@ -43,11 +47,13 @@ class NoteRepository {
   Future<void> update(Note note) async {
     if (note.id == null) throw ArgumentError('Note has no id');
     final db = await ZoeDatabase.instance.database;
+    final savedTitle = Note.titleFrom(note.title, note.content);
     await db.update(
       _table,
       {
-        'title': Note.titleFrom(note.title, note.content),
+        'title': savedTitle,
         'content': note.content.trim(),
+        'search_stems': QueryTerms.searchStems(savedTitle, note.content.trim()),
         'pinned': note.pinned ? 1 : 0,
         'updated_at': _now(),
       },

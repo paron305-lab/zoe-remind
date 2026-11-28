@@ -12,7 +12,8 @@ import 'package:zoe_remind/rag/retriever.dart';
 /// Takbuhin:  flutter test test/database/search_repository_test.dart
 ///
 /// B2: SearchRepository + Retriever sa totoong SQLite (sqflite_common_ffi),
-/// sariling temp folder. FTS4 at LIKE fallback — pareho dapat ang sagot.
+/// sariling temp folder. FTS4 at LIKE fallback — pareho dapat ang sagot
+/// (R1: kasama ang ugat ng salita sa pareho).
 void main() {
   setUpAll(() async {
     sqfliteFfiInit();
@@ -25,6 +26,7 @@ void main() {
     await notes.add(title: 'Shopping list', content: 'itlog, gatas, tinapay');
     await notes.add(title: 'Bahay', content: 'wifi sa bahay: zoe2026');
     await notes.add(title: 'Passport', content: 'passport number P1234567');
+    await notes.add(title: 'Sapatos', content: 'Binili ko ang running shoes sa SM'); // R1
     await MemoryRepository().add('Mas gusto ko ng morning reminders', source: 'user');
   });
 
@@ -47,6 +49,14 @@ void main() {
 
       test('"pin" ay hindi lumalabas sa "Shopping list"', () async {
         expect(await Retriever().search('ano pin ko'), isEmpty);
+      });
+
+      test('R1: "saan ako bumili ng sapatos?" → "Binili ko…" (ugat sa search_stems)', () async {
+        final docs = await SearchRepository().candidates(QueryTerms.parse('bumili'));
+        expect(docs.map((d) => d.title), ['Sapatos']);
+        final hits = await Retriever().search('saan ako bumili ng sapatos?');
+        expect(hits.first.doc.title, 'Sapatos');
+        expect((await Retriever().search('what shoes did I buy?')).first.doc.title, 'Sapatos');
       });
 
       test('memories kasama lang kapag includeMemories', () async {

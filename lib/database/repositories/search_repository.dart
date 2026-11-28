@@ -10,6 +10,9 @@ import 'package:zoe_remind/rag/rag_models.dart';
 ///
 /// FTS4 (notes_fts / memories_fts) kapag gumagana sa phone;
 /// kung hindi (o pumalya ang query) → LIKE, gaya ng dati.
+///
+/// R1: kasama sa paghahanap ang column na search_stems (mga ugat ng salita),
+/// kaya ang "=bili" mula sa "bumili?" ay tumatama sa note na "Binili ko…".
 class SearchRepository {
   static const _notes = StorageConstants.notesTable;
   static const _notesFts = StorageConstants.notesFtsTable;
@@ -49,9 +52,10 @@ class SearchRepository {
     }
     // LIKE ay substring ("pass" sa "passport") → salain gamit ang parehong
     // patakaran ng FTS (prefix 4+ letra, "=" eksakto), para pareho ang lumalabas.
+    // Kasama ang ugat (R1), gaya ng search_stems sa FTS.
     return found.values
         .where((d) {
-          final words = QueryTerms.tokens('${d.title} ${d.text}');
+          final words = QueryTerms.searchTokens('${d.title} ${d.text}');
           return terms.any((t) => QueryTerms.groupIn(t, words));
         })
         .toList();
@@ -84,8 +88,10 @@ class SearchRepository {
   // gamit ang parehong patakaran ng FTS, at hindi lalabas ang mali.
 
   Future<List<RetrievalDoc>> _likeNotes(Database db, TermGroup t) async {
-    final where = t.plainAlts.map((_) => '(title LIKE ? OR content LIKE ?)').join(' OR ');
-    final args = [for (final a in t.plainAlts) ...['%$a%', '%$a%']];
+    final where = t.plainAlts
+        .map((_) => '(title LIKE ? OR content LIKE ? OR search_stems LIKE ?)')
+        .join(' OR ');
+    final args = [for (final a in t.plainAlts) ...['%$a%', '%$a%', '%$a%']];
     final rows = await db.query(
       _notes,
       columns: ['id', 'title', 'content', 'pinned', 'updated_at'],
@@ -98,12 +104,12 @@ class SearchRepository {
   }
 
   Future<List<RetrievalDoc>> _likeMemories(Database db, TermGroup t) async {
-    final where = t.plainAlts.map((_) => 'content LIKE ?').join(' OR ');
+    final where = t.plainAlts.map((_) => '(content LIKE ? OR search_stems LIKE ?)').join(' OR ');
     final rows = await db.query(
       _memories,
       columns: ['id', 'content', 'importance', 'updated_at'],
       where: where,
-      whereArgs: [for (final a in t.plainAlts) '%$a%'],
+      whereArgs: [for (final a in t.plainAlts) ...['%$a%', '%$a%']],
       orderBy: 'updated_at DESC',
       limit: perTerm,
     );

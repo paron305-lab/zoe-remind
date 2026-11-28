@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:zoe_remind/core/constants/storage_constants.dart';
+import 'package:zoe_remind/rag/query_terms.dart';
+import 'package:zoe_remind/rag/stemmer.dart';
 
 /// Zoe's on-device database (zoe.db), stored in app-private storage.
 ///
@@ -34,7 +36,10 @@ class ZoeDatabase {
   ///      B6: "unicode61" tokenizer kapag kaya ng phone (Niño = nino);
   ///      kusang inililipat ang lumang "simple" index — walang version bump.
   /// v14: memories.kind + memories.value (Level 3 Companion memory).
-  static const _version = 14;
+  /// v15: notes.search_stems + memories.search_stems (R1 Stemmer) — mga ugat
+  ///      ng salita ("Binili" → bili), kasama sa FTS4. Pinupuno sa onOpen
+  ///      ([_ensureSearchStems]); walang nawawalang data.
+  static const _version = 15;
 
   Future<Database>? _opening;
 
@@ -73,8 +78,10 @@ class ZoeDatabase {
         await _createAllTables(db);
         await _migrate(db, oldVersion);
       },
-      // Tuwing bubuksan: siguraduhing nandiyan at tugma ang search index.
+      // Tuwing bubuksan: siguraduhing kumpleto ang search_stems (R1) at
+      // nandiyan at tugma ang search index.
       onOpen: (db) async {
+        await _ensureSearchStems(db);
         searchReady = await _ensureSearchIndex(db);
       },
     );
@@ -86,14 +93,75 @@ class ZoeDatabase {
     _FtsSpec(
       table: StorageConstants.notesTable,
       fts: StorageConstants.notesFtsTable,
-      columns: ['title', 'content'],
+      columns: ['title', 'content', 'search_stems'],
     ),
     _FtsSpec(
       table: StorageConstants.memoriesTable,
       fts: StorageConstants.memoriesFtsTable,
-      columns: ['content'],
+      columns: ['content', 'search_stems'],
     ),
   ];
+
+  // ───────────────────────── search_stems (R1, v15) ─────────────────────────
+
+  /// Settings key: aling bersyon ng Stemmer ang gumawa ng search_stems.
+  static const stemsVersionKey = 'search_stems_version';
+
+  /// Pinupunan ang search_stems ng notes / memories na wala pa (lumang data
+  /// pagkatapos ng update sa v15). Kapag iba ang [Stemmer.version] (nagbago
+  /// ang patakaran) o [force] (Developer › Rebuild) → ginagawa ulit LAHAT.
+  ///
+  /// Ang note / memory mismo ay hindi ginagalaw — search_stems lang.
+  /// Hindi nagt-throw: kapag pumalya, gumagana pa rin ang search (salita lang,
+  /// walang ugat) at susubukan ulit sa susunod na bukas.
+  static Future<void> _ensureSearchStems(Database db, {bool force = false}) async {
+    try {
+      final stored = await db.query('settings',
+          columns: ['value'], where: 'key = ?', whereArgs: [stemsVersionKey], limit: 1);
+      final all = force || stored.isEmpty || stored.first['value'] != '${Stemmer.version}';
+      final where = all ? null : 'search_stems IS NULL';
+
+      final notes = await db.query(StorageConstants.notesTable,
+          columns: ['id', 'title', 'content'], where: where);
+      final memories = await db.query(StorageConstants.memoriesTable,
+          columns: ['id', 'content'], where: where);
+
+      await db.transaction((txn) async {
+        final batch = txn.batch();
+        for (final r in notes) {
+          batch.update(
+            StorageConstants.notesTable,
+            {
+              'search_stems': QueryTerms.searchStems(
+                  (r['title'] as String?) ?? '', (r['content'] as String?) ?? ''),
+            },
+            where: 'id = ?',
+            whereArgs: [r['id']],
+          );
+        }
+        for (final r in memories) {
+          batch.update(
+            StorageConstants.memoriesTable,
+            {'search_stems': QueryTerms.searchStems('', (r['content'] as String?) ?? '')},
+            where: 'id = ?',
+            whereArgs: [r['id']],
+          );
+        }
+        batch.insert(
+          'settings',
+          {
+            'key': stemsVersionKey,
+            'value': '${Stemmer.version}',
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        await batch.commit(noResult: true);
+      });
+    } catch (e) {
+      debugPrint('search_stems backfill failed: $e');
+    }
+  }
 
   /// Gumagawa ng FTS4 tables + triggers kung wala pa, at nire-rebuild kapag
   /// hindi tugma ang bilang ng rows (hal. unang bukas pagkatapos ng update).
@@ -111,8 +179,9 @@ class ZoeDatabase {
       for (final spec in _searchSpecs) {
         final sql = await _tableSql(db, spec.fts);
         var fresh = sql == null;
-        if (sql != null && tokenizerOf(sql) != tokenizer) {
-          // Lumang tokenizer → gawin ulit (triggers muna, saka ang table).
+        if (sql != null && (tokenizerOf(sql) != tokenizer || !hasColumns(sql, spec.columns))) {
+          // Lumang tokenizer o kulang na column (hal. walang search_stems bago
+          // ang v15) → gawin ulit (triggers muna, saka ang table).
           for (final drop in spec.dropTriggerSql) {
             await db.execute(drop);
           }
@@ -161,6 +230,20 @@ class ZoeDatabase {
   /// 'unicode61' o 'simple', mula sa CREATE VIRTUAL TABLE na SQL.
   static String tokenizerOf(String createSql) =>
       createSql.toLowerCase().contains('unicode61') ? 'unicode61' : 'simple';
+
+  /// Nasa CREATE VIRTUAL TABLE na SQL ba ang lahat ng [columns]?
+  /// "fts4(title, content)" + [title, content, search_stems] → false.
+  static bool hasColumns(String createSql, List<String> columns) {
+    final open = createSql.indexOf('(');
+    final close = createSql.lastIndexOf(')');
+    if (open < 0 || close <= open) return false;
+    final names = createSql
+        .substring(open + 1, close)
+        .split(',')
+        .map((c) => c.trim().split(RegExp(r'\s+')).first.toLowerCase())
+        .toSet();
+    return columns.every(names.contains);
+  }
 
   /// Ang CREATE SQL ng table (mula sa sqlite_master), o null kung wala.
   static Future<String?> _tableSql(Database db, String name) async {
@@ -211,9 +294,11 @@ class ZoeDatabase {
     );
   }
 
-  /// Developer › "Rebuild": gawin ulit ang index (o subukan ulit kung pumalya).
+  /// Developer › "Rebuild": gawin ulit ang search_stems at ang index
+  /// (o subukan ulit kung pumalya).
   Future<SearchIndexStatus> rebuildSearchIndex() async {
     final db = await database;
+    await _ensureSearchStems(db, force: true);
     searchReady = await _ensureSearchIndex(db);
     if (searchReady) {
       for (final spec in _searchSpecs) {
@@ -256,6 +341,12 @@ class ZoeDatabase {
       await _addColumnIfMissing(
           db, StorageConstants.memoriesTable, 'kind', "TEXT NOT NULL DEFAULT 'general'");
       await _addColumnIfMissing(db, StorageConstants.memoriesTable, 'value', 'TEXT');
+    }
+    if (oldVersion < 15) {
+      // R1: mga ugat ng salita para sa search. NULL = hindi pa nagagawa →
+      // pinupunan sa onOpen (_ensureSearchStems), saka ginagawa ulit ang FTS.
+      await _addColumnIfMissing(db, StorageConstants.notesTable, 'search_stems', 'TEXT');
+      await _addColumnIfMissing(db, StorageConstants.memoriesTable, 'search_stems', 'TEXT');
     }
     // v13: walang column change. Ang notes_fts / memories_fts ay ginagawa
     // at pinupuno sa onOpen (_ensureSearchIndex) — kasama ang lumang notes.
@@ -521,7 +612,8 @@ class ZoeDatabase {
         source TEXT NOT NULL DEFAULT 'typed',
         pinned INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        search_stems TEXT
       )
     ''');
 
@@ -568,7 +660,8 @@ class ZoeDatabase {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         kind TEXT NOT NULL DEFAULT 'general',
-        value TEXT
+        value TEXT,
+        search_stems TEXT
       )
     ''');
 

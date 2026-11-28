@@ -8,10 +8,12 @@ import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/database/repositories/memory_repository.dart';
 import 'package:zoe_remind/database/repositories/note_repository.dart';
 import 'package:zoe_remind/rag/retriever.dart';
+import 'package:zoe_remind/rag/stemmer.dart';
 
 /// Takbuhin:  flutter test test/database/search_index_test.dart
 ///
-/// B1: FTS4 search index (DB v13). Totoong SQLite sa PC (sqflite_common_ffi),
+/// B1: FTS4 search index (DB v13). R1: search_stems (DB v15) — mga ugat ng
+/// salita, kasama sa index. Totoong SQLite sa PC (sqflite_common_ffi),
 /// sariling temp folder — hindi kasabay ng ibang DB test, hindi ang phone.
 ///
 /// Sinisimulan sa LUMANG zoe.db (v12, may notes na) para ma-test ang
@@ -101,11 +103,11 @@ Future<void> main() async {
     );
     await old.close();
 
-    db = await ZoeDatabase.instance.database; // v12 → v14 + onOpen
+    db = await ZoeDatabase.instance.database; // v12 → v15 + onOpen
   });
 
-  test('upgrade v12 → v14: bumubukas kahit walang FTS4, at nahahanap pa rin ang notes', () async {
-    expect(await db.getVersion(), 14);
+  test('upgrade v12 → v15: bumubukas kahit walang FTS4, at nahahanap pa rin ang notes', () async {
+    expect(await db.getVersion(), 15);
     expect(ZoeDatabase.instance.searchReady, fts4);
     if (!fts4) expect(ZoeDatabase.instance.searchError, contains('fts4'));
     // FTS4 o LIKE — pareho dapat ang sagot.
@@ -114,22 +116,101 @@ Future<void> main() async {
     expect(await Retriever().search('ano pin ko'), isEmpty); // hindi "shopping"
   });
 
-  test('upgrade v12 → v14: lumang memory ay "general" (Level 3 kind + value)', () async {
+  test('upgrade v12 → v15: lumang memory ay "general" (Level 3 kind + value)', () async {
     final rows = await db.query('memories', columns: ['kind', 'value']);
     expect(rows.single['kind'], 'general');
     expect(rows.single['value'], isNull);
   });
 
-  test('upgrade v12 → v14: gumagana ang FTS4 at kasama ang lumang notes', () async {
+  test('upgrade v12 → v15 (R1): napunan ang search_stems ng lumang notes / memories', () async {
+    final notes = await db.query('notes', columns: ['id', 'search_stems'], orderBy: 'id');
+    expect(notes.map((r) => r['search_stems']).toList(), ['', 'shop']); // "Shopping list" → shop
+    final mem = await db.query('memories', columns: ['search_stems']);
+    expect(mem.single['search_stems'], 'reminder'); // "reminders" → reminder
+    final version = await db.query('settings',
+        where: 'key = ?', whereArgs: [ZoeDatabase.stemsVersionKey]);
+    expect(version.single['value'], '${Stemmer.version}');
+  });
+
+  test('R1: bagong note → may search_stems; "bumili" → "Binili ko…" (FTS4 o LIKE)', () async {
+    final repo = NoteRepository();
+    final id = await repo.add(title: 'Sapatos', content: 'Binili ko ang shoes sa SM');
+    final row = await db.query('notes', where: 'id = ?', whereArgs: [id]);
+    expect(row.single['search_stems'], 'bili shoe');
+
+    final hits = await Retriever().search('saan ako bumili ng sapatos?');
+    expect(hits.first.doc.id, id);
+    expect((await Retriever().search('what shoes did I buy?')).first.doc.id, id);
+
+    // edit → nagbabago rin ang search_stems
+    await repo.update((await repo.getById(id))!.copyWith(content: 'Nagluto ako ng adobo'));
+    final edited = await db.query('notes', where: 'id = ?', whereArgs: [id]);
+    expect(edited.single['search_stems'], 'luto');
+    await repo.delete(id);
+  });
+
+  test('upgrade v12 → v15: gumagana ang FTS4 at kasama ang lumang notes', () async {
     expect(ZoeDatabase.instance.searchReady, isTrue, reason: ZoeDatabase.instance.searchError);
-    expect(await db.getVersion(), 14);
+    expect(await db.getVersion(), 15);
     expect(await count(StorageConstants.notesFtsTable), 2);
     expect(await count(StorageConstants.memoriesFtsTable), 1);
     expect(await notesMatching('zoe123'), [1]);
     expect(await notesMatching('wifi*'), [1]);
     expect(await notesMatching('"wi fi"'), [1]); // "Wi-Fi" → wi + fi
     expect(await notesMatching('tinapay'), [2]);
+    expect(await notesMatching('shop'), [2]); // R1: ugat sa search_stems
   }, skip: skipFts);
+
+  test('R1: ugat sa FTS4 — "bili" → "Binili", sabay sa add / edit / delete', () async {
+    final repo = NoteRepository();
+    final id = await repo.add(title: 'Sapatos', content: 'Binili ko ang sapatos sa SM');
+    expect(await notesMatching('bili'), [id]);
+    await repo.update((await repo.getById(id))!.copyWith(content: 'Nagluto ako ng adobo'));
+    expect(await notesMatching('bili'), isEmpty);
+    expect(await notesMatching('luto'), [id]);
+    await repo.delete(id);
+    expect(await notesMatching('luto'), isEmpty);
+
+    final memories = MemoryRepository();
+    final mid = await memories.add('Hindi ako umiinom ng kape', source: 'user');
+    final rows = await db.rawQuery(
+      'SELECT docid FROM ${StorageConstants.memoriesFtsTable} '
+      'WHERE ${StorageConstants.memoriesFtsTable} MATCH ?',
+      ['inom'],
+    );
+    expect(rows.map((r) => r['docid']), [mid]);
+    await memories.delete(mid!);
+  }, skip: skipFts);
+
+  test('R1: lumang index na walang search_stems → kusang ginagawa ulit', () async {
+    // Gayahin ang index bago ang v15 (title, content lang).
+    for (final t in ['ai', 'au', 'ad']) {
+      await db.execute('DROP TRIGGER IF EXISTS ${StorageConstants.notesFtsTable}_$t');
+    }
+    await db.execute('DROP TABLE ${StorageConstants.notesFtsTable}');
+    final tok = unicode61 ? ', ${ZoeDatabase.unicodeTokenizerSql}' : '';
+    await db.execute(
+        'CREATE VIRTUAL TABLE ${StorageConstants.notesFtsTable} USING fts4(title, content$tok)');
+    await db.execute('INSERT INTO ${StorageConstants.notesFtsTable} (docid, title, content) '
+        'SELECT id, title, content FROM notes');
+    expect(await notesMatching('shop'), isEmpty);
+
+    final status = await ZoeDatabase.instance.rebuildSearchIndex();
+    expect(status.ready, isTrue);
+    expect(status.inSync, isTrue);
+    final sql = await db.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE name = '${StorageConstants.notesFtsTable}'");
+    expect(sql.first['sql'] as String, contains('search_stems'));
+    expect(await notesMatching('shop'), [2]);
+  }, skip: skipFts);
+
+  test('hasColumns', () {
+    expect(ZoeDatabase.hasColumns('CREATE VIRTUAL TABLE x USING fts4(title, content)',
+        ['title', 'content', 'search_stems']), isFalse);
+    expect(ZoeDatabase.hasColumns(
+        'CREATE VIRTUAL TABLE x USING fts4(title, content, search_stems, tokenize=unicode61 "remove_diacritics=1")',
+        ['title', 'content', 'search_stems']), isTrue);
+  });
 
   test('"pin" ay hindi tumatama sa "shopping" (hindi na substring)', () async {
     expect(await notesMatching('pin'), isEmpty);

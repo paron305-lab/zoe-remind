@@ -26,13 +26,14 @@ import 'package:zoe_remind/rag/retriever.dart';
 class BenchFloor {
   BenchFloor._();
 
-  /// R0 baseline (repo 7f0f8d8): 100 / 156 tama sa #1.
-  static const hit1 = 100;
+  /// R1 (Stemmer TL + EN + Taglish): 119 / 156 tama sa #1.
+  /// (R0 baseline, repo 7f0f8d8: 100.)
+  static const hit1 = 119;
 
-  /// R0 baseline: 113 / 156 nasa top 3.
-  static const hit3 = 113;
+  /// R1: 126 / 156 nasa top 3. (R0: 113.)
+  static const hit3 = 126;
 
-  /// R0 baseline: 9 / 20 tapat na "wala".
+  /// R1: 9 / 20 tapat na "wala" (R2 ang aayos nito). (R0: 9.)
   static const honest = 9;
 }
 

@@ -7,6 +7,7 @@ import 'package:zoe_remind/rag/rag_models.dart';
 /// RAG retrieval (deterministic): hinahanap sa notes + memories ang sagot.
 ///
 ///   1. QueryTerms  → mga salita sa tanong (walang "ano", "ko", "the"…)
+///                    + ugat (R1: "bumili" → bili)
 ///   2. SearchRepository → mga kandidato (FTS4, o LIKE kung walang FTS4)
 ///   3. [rank]      → score, pinakamataas muna
 ///
@@ -48,8 +49,9 @@ class Retriever {
   }) {
     final hits = <RetrievalHit>[];
     for (final d in docs) {
-      final titleTokens = QueryTerms.tokens(d.title);
-      final allTokens = [...titleTokens, ...QueryTerms.tokens(d.text)];
+      // R1: kasama ang ugat ng mga salita ("Binili" → bili, "batteries" → battery).
+      final titleTokens = QueryTerms.searchTokens(d.title);
+      final allTokens = [...titleTokens, ...QueryTerms.searchTokens(d.text)];
       var matched = 0;
       var inTitle = 0;
       for (final t in terms) {

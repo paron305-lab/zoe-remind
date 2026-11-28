@@ -1,3 +1,5 @@
+import 'package:zoe_remind/rag/stemmer.dart';
+
 /// Isang salitang hahanapin + mga kapareho nito (synonyms).
 /// Tumatama ang grupo kapag tumama ang KAHIT ISA sa [alts].
 class TermGroup {
@@ -7,6 +9,7 @@ class TermGroup {
   final String word;
 
   /// Kasama ang [word]. May space = magkasunod na salita ("wi fi").
+  /// R1: kasama rin ang ugat, eksakto ("binili" → "=bili").
   final List<String> alts;
 
   /// FTS4 MATCH expression: `password* OR passcode* OR pw`.
@@ -29,6 +32,14 @@ class TermGroup {
 ///   "saan ko nilagay ang susi ng kotse?" → susi, kotse
 ///   "what's my locker code"           → locker, code
 ///   "kaarawan ni Niño?"               → kaarawan, niño (+ nino)
+///   "saan ako bumili ng sapatos?"     → bumili (+ =bili, buy), sapatos   ← R1
+///
+/// R1 (Stemmer): bawat salita ay may dagdag na alt na UGAT, eksakto
+/// ("=bili"). Ang note ay hinahanap din sa ugat ng mga salita nito
+/// ([searchTokens] dito, column na search_stems sa DB), kaya tumatama ang
+/// "bumili" sa "Binili ko…", ang "batteries" sa "battery", ang "pinaprint"
+/// sa "Pina-print". Hindi hinahanap ang unlapi na hiwalay dahil sa gitling
+/// ("nag" sa "nag-gas"), at ang salitang stopword ang ugat ("am" → be).
 ///
 /// Paghati ng salita (B6): gaya ng FTS4 "unicode61" tokenizer —
 /// maliit na titik, letra / numero lang (kahit ñ, é), hati sa bantas, space at
@@ -80,6 +91,15 @@ class QueryTerms {
   static List<String> tokens(String text) =>
       fold(text).split(_split).where((t) => t.isNotEmpty).toList();
 
+  /// R1: [tokens] + ang ugat ng mga ito (para sa Retriever at LIKE fallback).
+  ///   "Binili ko ang shoes" → binili, ko, ang, shoes, bili, shoe
+  static List<String> searchTokens(String text) => Stemmer.withStems(tokens(text));
+
+  /// R1: laman ng column na search_stems (DB v15) — mga ugat lang na iba sa
+  /// salita, walang ulit. "Binili ko ang shoes" → "bili shoe".
+  static String searchStems(String title, String content) =>
+      Stemmer.stemText(tokens('$title $content'));
+
   /// Mga salitang hindi nakakatulong sa paghahanap ("ano", "ko", "the"…).
   /// Ginagamit din ng chat brain at ng memory de-dupe.
   static const stopWords = {
@@ -98,6 +118,8 @@ class QueryTerms {
     'remember', 'told', 'again', 'please', 'still', 'to', 'in', 'on', 'for', 'with', 'it',
     'this', 'that', 'and', 'or', 'can', 'could', 'tell', 'show', 'find', 'search', 'know',
     'saved', 'save', 'put', 'kept', 'keep', 'have', 'had', 'there', 's',
+    // R1: ugat ng am / is / are / was / been (Stemmer) — "am" ≠ "6:15 AM"
+    'be',
   };
 
   /// Mga magkakapareho (EN / TL / Taglish). Bawat salita sa isang grupo ay
@@ -157,6 +179,16 @@ class QueryTerms {
     ['passport', 'pasaporte'],
     ['license', 'licence', 'lisensya', 'lisensiya'],
     ['ticket', 'tiket'],
+    // R1: ugat ng Tagalog na pandiwa ↔ English (Taglish). "=" = eksakto, para
+    // "bili" ≠ "bilis", "laba" ≠ "labas". Tumatama sa banghay dahil sa
+    // Stemmer: "binili" → bili ↔ "bought" → buy.
+    ['=bili', 'buy', 'purchase'],
+    ['=bayad', 'pay', 'payment'],
+    ['=luto', 'cook'],
+    ['=kain', 'eat'],
+    ['=inom', 'drink'],
+    ['=hiram', 'borrow'],
+    ['=laba', 'laundry', 'wash'],
   ];
 
   /// "=mama" → "mama".
@@ -164,34 +196,51 @@ class QueryTerms {
 
   /// Ang mga salitang hahanapin, walang ulit, hanggang [maxTerms].
   /// May tuldik ("niño") → kasama rin ang walang tuldik ("nino").
+  /// Walang ulit sa UGAT din: "shoes shoe" → isang grupo lang.
   static List<TermGroup> parse(String question) {
     final seen = <String>{};
     final groups = <TermGroup>[];
     for (final w in rawTokens(question)) {
       final key = fold(w);
-      if (key.length < 2 || stopWords.contains(key) || !seen.add(key)) continue;
-      groups.add(TermGroup(w, _altsFor(w, key)));
+      if (key.length < 2 || stopWords.contains(key) || Stemmer.isBareAffix(key)) continue;
+      final stem = Stemmer.stem(key);
+      if (stopWords.contains(stem) || !seen.add(stem)) continue;
+      groups.add(TermGroup(w, _altsFor(w, key, stem)));
       if (groups.length == maxTerms) break;
     }
     return groups;
   }
 
-  static List<String> _altsFor(String word, String key) {
-    List<String>? group;
+  /// Ang synonym group na may [key], o null.
+  static List<String>? _groupOf(String key) {
     for (final g in _synonyms) {
-      if (g.any((w) => bare(w) == key)) {
-        group = g;
-        break;
-      }
+      if (g.any((w) => bare(w) == key)) return g;
+    }
+    return null;
+  }
+
+  static List<String> _altsFor(String word, String key, String stem) {
+    // Synonym ng salita mismo; kung wala, ng ugat ("medicines" → medicine → gamot).
+    var gkey = key;
+    var group = _groupOf(key);
+    if (group == null && stem != key) {
+      group = _groupOf(stem);
+      if (group != null) gkey = stem;
     }
     // "mama" na nasa listahan bilang "=mama" → eksakto rin ang tinype.
-    final exact = group?.contains('=$key') ?? false;
+    final exact = group?.contains('=$gkey') ?? false;
     String mark(String w) => exact ? '=$w' : w;
-    return [
-      mark(word),
-      if (key != word) mark(key),
-      if (group != null) ...group.where((w) => bare(w) != key),
-    ];
+    final out = [mark(word), if (key != word) mark(key)];
+    // R1: ang ugat, eksakto — tumatama sa ugat ng note ("Binili" → bili).
+    if (stem != key && !out.any((a) => bare(a) == stem)) out.add('=$stem');
+    if (group != null) {
+      for (final w in group) {
+        final b = bare(w);
+        if (b == gkey || b == key || out.any((a) => bare(a) == b)) continue;
+        out.add(w);
+      }
+    }
+    return out;
   }
 
   /// Isang alt bilang FTS4 term: phrase → `"wi fi"`, 4+ letra → `code*`,
@@ -203,7 +252,8 @@ class QueryTerms {
   }
 
   /// Tumatama ba ang [group] sa mga salita ng isang note / memory?
-  /// [docTokens] = galing sa [tokens] (walang tuldik).
+  /// [docTokens] = galing sa [tokens] (walang tuldik), o [searchTokens]
+  /// para kasama ang ugat (R1).
   /// Parehong patakaran ng FTS4 (prefix kapag 4+ letra), para tugma ang
   /// score sa nakita ng database.
   static bool groupIn(TermGroup group, List<String> docTokens) => group.alts.any(

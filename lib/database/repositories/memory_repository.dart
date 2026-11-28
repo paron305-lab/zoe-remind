@@ -8,6 +8,7 @@ import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/memory/companion_facts.dart';
 import 'package:zoe_remind/memory/companion_profile.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
+import 'package:zoe_remind/rag/query_terms.dart';
 
 /// Ang tanging nagbabasa/nagsusulat ng memories table (long-term memory ni Zoe).
 /// Zoe Chat ("tandaan mo na mas gusto ko…", pagkatapos ng Accept) → add().
@@ -48,6 +49,8 @@ class MemoryRepository {
     if (text.isEmpty) return null;
     final db = await ZoeDatabase.instance.database;
     final now = _now();
+    // R1: mga ugat ng salita para sa search ("umiinom" → inom).
+    final stems = QueryTerms.searchStems('', text);
 
     final existing = await db.query(
       _table,
@@ -66,6 +69,7 @@ class MemoryRepository {
         _table,
         {
           'content': text,
+          'search_stems': stems,
           // "sinabi mo mismo" ay hindi bumababa sa "natutunan sa chat"
           'source': oldSource == 'user' ? 'user' : source,
           'importance': math.max((row['importance'] as int?) ?? 3, importance).clamp(1, 5),
@@ -87,6 +91,7 @@ class MemoryRepository {
 
     final id = await db.insert(_table, {
       'content': text,
+      'search_stems': stems,
       'source': source,
       'importance': importance.clamp(1, 5),
       'kind': kind.db,
