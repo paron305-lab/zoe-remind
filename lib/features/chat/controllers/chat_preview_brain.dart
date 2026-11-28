@@ -36,6 +36,7 @@ import 'package:zoe_remind/rag/history_query.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
 import 'package:zoe_remind/rag/search_misses.dart';
+import 'package:zoe_remind/rag/snippet.dart';
 
 /// Utak ng Zoe Chat (hybrid): code muna, si Qwen kapag hindi sigurado ang code.
 ///
@@ -709,8 +710,12 @@ class ChatPreviewBrain {
       }
     }
 
-    var hits = await find(words.isEmpty ? lower : words.join(' '));
-    if (hits.isEmpty && words.isNotEmpty) hits = await find(lower);
+    var query = words.isEmpty ? lower : words.join(' ');
+    var hits = await find(query);
+    if (hits.isEmpty && words.isNotEmpty) {
+      query = lower;
+      hits = await find(lower);
+    }
 
     if (hits.isEmpty) {
       // B6: para makita sa Developer kung anong tanong ang pumapalya (RAM lang).
@@ -726,18 +731,27 @@ class ChatPreviewBrain {
 
     final top = hits.first;
     final best = top.doc;
-    final shown = best.text.length > 300 ? '${best.text.substring(0, 300)}…' : best.text;
+    // R3: ang linyang tumama lang (naka-bold ang mga salita ng tanong),
+    // hindi na ang unang 300 letra ng buong note.
+    final snip = Snippet.of(best.text, query);
     final ZoeSituation line;
     if (best.isMemory) {
       line = top.isSure ? ZoeSituation.memoryFound : ZoeSituation.memoryMaybe;
     } else {
       line = top.isSure ? ZoeSituation.noteFound : ZoeSituation.noteMaybe;
     }
+    final text = _say(line, best.isMemory ? {'memory': snip.text} : {'note': snip.text});
+    // Nasa dulo ng linya ang {note} / {memory} → doon ang bold.
+    final at = snip.isEmpty ? -1 : text.lastIndexOf(snip.text);
     return AnswerEntry(
       assumption: best.isMemory
           ? _t('From what you told me', 'Galing sa sinabi mo sa akin')
           : _t('From your notes', 'Galing sa notes mo'),
-      text: _say(line, best.isMemory ? {'memory': shown} : {'note': shown}),
+      text: text,
+      bold: at < 0 ? const [] : snip.shift(at).bold,
+      more: snip.partial && !best.isMemory
+          ? AnswerLink(_t('Full note →', 'Buong note →'), '/notes/edit/${best.id}')
+          : null,
       rows: [for (final h in hits) _sourceRow(h.doc)],
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
+import 'package:zoe_remind/rag/snippet.dart';
 
 /// Lahat ng puwedeng lumabas sa Zoe chat list.
 /// UI lang ito — ang naka-save sa ai_messages ay text bubbles lang.
@@ -147,14 +148,33 @@ class AnswerRow {
   final String? route;
 }
 
+/// R3: "Buong note →" sa ilalim ng snippet (bubuksan ang note).
+class AnswerLink {
+  const AnswerLink(this.label, this.route);
+  final String label;
+  final String route;
+}
+
 /// Sagot sa tanong tungkol sa sariling data (Memory Engine / RAG).
 /// "📅 Assuming Sept 3, 2026" chip + text + colored summary rows.
 /// Kapag galing sa notes / memories: ang rows ay ang mga SOURCE.
+///
+/// R3: [bold] = mga bahagi ng [text] na naka-bold (ang mga salitang tumama
+/// sa tanong). [more] = "Buong note →" kapag bahagi lang ng note ang
+/// ipinakita.
 class AnswerEntry extends ChatEntry {
-  AnswerEntry({required this.assumption, required this.text, this.rows = const []});
+  AnswerEntry({
+    required this.assumption,
+    required this.text,
+    this.rows = const [],
+    this.bold = const [],
+    this.more,
+  });
   final String assumption;
   final String text;
   final List<AnswerRow> rows;
+  final List<SnippetSpan> bold;
+  final AnswerLink? more;
 }
 
 /// "Pasensya, hindi ko naintindihan…" + [Retry].

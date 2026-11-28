@@ -14,6 +14,7 @@ import 'package:zoe_remind/rag/retriever.dart';
 ///
 /// B3: "ano wifi password ko?" → Retriever → sagot + mga source.
 /// R2: sigurado → "Ito ang nakita ko…" · hindi sigurado → "Baka ito? 🤔".
+/// R3: linyang tumama lang, naka-bold ang salita, "Buong note →" kapag mahaba.
 /// Walang database — fake SearchRepository.
 
 /// Hindi tinatawag si Qwen sa test.
@@ -62,8 +63,8 @@ void main() {
     ),
   ];
 
-  ChatPreviewBrain brain({bool memoryOn = true}) => ChatPreviewBrain(
-        retriever: Retriever(repo: _FakeSearch(docs), clock: () => now),
+  ChatPreviewBrain brain({bool memoryOn = true, List<RetrievalDoc>? docsIn}) => ChatPreviewBrain(
+        retriever: Retriever(repo: _FakeSearch(docsIn ?? docs), clock: () => now),
         memoryOn: () async => memoryOn,
         classifier: _NoQwen(),
         mood: () => MoodState.content,
@@ -88,6 +89,9 @@ void main() {
     expect(a.rows.map((r) => r.label), ['Wifi · Nov 18', 'Bahay · Nov 2']);
     expect(a.rows.map((r) => r.tone).toSet(), {AnswerTone.note});
     expect(a.rows.first.route, '/notes/edit/1');
+    // R3: maikli ang note → buo, naka-bold ang tumama, walang "Buong note →".
+    expect(bolded(a), ['Wi-Fi', 'password']);
+    expect(a.more, isNull);
   });
 
   test('memory ang sagot → "Galing sa sinabi mo sa akin"', () async {
@@ -98,6 +102,7 @@ void main() {
     expect(a.text, startsWith('Baka ito? 🤔 Sinabi mo sa akin'));
     expect(a.rows.single.tone, AnswerTone.memory);
     expect(a.rows.single.route, isNull); // walang listahan ng memories
+    expect(a.more, isNull);
   });
 
   test('OFF ang long-term memory → hindi binabasa ang memories', () async {
@@ -126,5 +131,56 @@ void main() {
     final a = await ask(brain(), 'ano plate number ko?');
     expect(a.assumption, 'Hinanap sa notes mo');
     expect(ZoeLines.optionsFor(lang, ZoeSituation.noteNotFound, MoodState.content), contains(a.text));
+    expect(a.bold, isEmpty);
+    expect(a.more, isNull);
+  });
+
+  // ── R3: snippet
+  final checklist = RetrievalDoc(
+    source: RetrievalSource.note,
+    id: 4,
+    title: 'Bahay checklist',
+    text: 'Ilaw sa garahe: palitan ang bumbilya bago mag-Pasko\n'
+        'Susi ng kotse: nasa drawer sa kusina\n'
+        'Gate password: 4455\n'
+        'Tubig: tawagan si Mang Ben kapag tumutulo ulit ang gripo sa banyo\n'
+        'Basura: Martes at Biyernes ng umaga',
+    updatedAt: DateTime(2026, 11, 20),
+  );
+  final errands = RetrievalDoc(
+    source: RetrievalSource.note,
+    id: 5,
+    title: 'Errands',
+    text: 'Errands list for the week\n'
+        '- Bought battery sa Ace Hardware, 4 pcs AA\n'
+        '- Paid Meralco Nov 15\n'
+        '- Returned library books\n'
+        '- Picked up laundry at the shop near the church\n'
+        '- Called the dentist for Saturday',
+    updatedAt: DateTime(2026, 11, 19),
+  );
+
+  test('R3: mahabang note → linyang tumama lang + bold + "Buong note →"', () async {
+    final a = await ask(brain(docsIn: [checklist]), 'saan ko nilagay ang susi ng kotse?');
+    expect(a.text, 'Ito ang nakita ko sa notes mo: Susi ng kotse: nasa drawer sa kusina');
+    expect(a.text, isNot(contains('Basura')));
+    expect(bolded(a), ['Susi', 'kotse']);
+    expect(a.more?.label, 'Buong note →');
+    expect(a.more?.route, '/notes/edit/4');
+    expect(a.rows.single.route, '/notes/edit/4');
+  });
+
+  test('R3: English → "Full note →", bold sa banghay ("Bought battery")', () async {
+    final entries =
+        await brain(docsIn: [errands]).reply('where did I buy the batteries?', ZoeLanguage.english);
+    final a = entries.single as AnswerEntry;
+    expect(a.text, endsWith('- Bought battery sa Ace Hardware, 4 pcs AA'));
+    expect(a.text, isNot(contains('Meralco')));
+    expect(bolded(a), ['Bought', 'battery']);
+    expect(a.more?.label, 'Full note →');
+    expect(a.more?.route, '/notes/edit/5');
   });
 }
+
+/// Mga salitang naka-bold sa sagot (R3).
+List<String> bolded(AnswerEntry a) => [for (final b in a.bold) a.text.substring(b.start, b.end)];
