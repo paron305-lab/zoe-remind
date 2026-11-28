@@ -173,7 +173,8 @@ void main() {
         brainWith(_FakeQwen('search_notes | gamot, mama'), search: _FakeSearch(const [])),
         q,
       );
-      expect(a.assumption, 'Hinanap sa notes mo: gamot, mama');
+      // R5: hinahanap na rin ang reminders + tasks.
+      expect(a.assumption, 'Hinanap sa notes, reminders at tasks mo: gamot, mama');
       expect(a.rows, isEmpty);
       expect(SearchMisses.items.single.question, ChatRouter.clean(q));
     });

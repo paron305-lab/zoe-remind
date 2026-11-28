@@ -17,6 +17,7 @@ import 'package:zoe_remind/rag/retriever.dart';
 /// R3: linyang tumama lang, naka-bold ang salita, "Buong note →" kapag mahaba.
 /// R4: reminders + tasks — "May paalala ka: Dentist appointment — Dec 3, 3:00 PM",
 /// naka-grupo ang mga source.
+/// R5: follow-up — "eh kay papa?", "yung isa pa", "hindi yan", "buksan mo", "oo".
 /// Walang database — fake SearchRepository.
 
 /// Hindi tinatawag si Qwen sa test.
@@ -131,7 +132,8 @@ void main() {
 
   test('walang nahanap → noteNotFound, walang iniimbento', () async {
     final a = await ask(brain(), 'ano plate number ko?');
-    expect(a.assumption, 'Hinanap sa notes mo');
+    // R5: hinahanap na rin ang reminders + tasks → hindi na "sa notes" lang.
+    expect(a.assumption, 'Hinanap sa notes, reminders at tasks mo');
     expect(ZoeLines.optionsFor(lang, ZoeSituation.noteNotFound, MoodState.content), contains(a.text));
     expect(a.bold, isEmpty);
     expect(a.more, isNull);
@@ -283,6 +285,145 @@ void main() {
     expect(a.text, startsWith('Baka ito? 🤔'));
     expect(a.text, contains('zoe123'));
     expect(a.rows.map((r) => r.tone).toSet(), {AnswerTone.note});
+  });
+
+  // ── R5: follow-up
+  group('R5 follow-up', () {
+    final gamotMama = RetrievalDoc(
+      source: RetrievalSource.note,
+      id: 21,
+      title: 'Gamot ni Mama',
+      text: 'Losartan 50mg tuwing umaga',
+      updatedAt: DateTime(2026, 11, 18),
+    );
+    final gamotPapa = RetrievalDoc(
+      source: RetrievalSource.note,
+      id: 22,
+      title: 'Gamot ni Papa',
+      text: 'Metformin 500mg pagkatapos kumain',
+      updatedAt: DateTime(2026, 11, 17),
+    );
+
+    Future<List<ChatEntry>> say(ChatPreviewBrain b, String text) => b.reply(text, lang);
+
+    test('"eh kay papa?" → "gamot papa" ang hinanap → gamot ni papa', () async {
+      final b = brain(docsIn: [gamotMama, gamotPapa]);
+      final first = await ask(b, 'ano gamot ng mama ko?');
+      expect(first.text, contains('Losartan'));
+
+      final a = await ask(b, 'eh kay papa?');
+      expect(a.text, contains('Metformin'));
+      expect(a.text, isNot(contains('Losartan')));
+      expect(a.assumption, 'Galing sa notes mo · hinanap: gamot, papa');
+      expect(a.rows.first.route, '/notes/edit/22');
+    });
+
+    test('"yung isa pa" → ang pangalawang nahanap; wala na → tapat na "wala na"', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+
+      final a = await ask(b, 'yung isa pa');
+      expect(a.assumption, 'Iba pang nakita (2 sa 2)');
+      expect(a.text, contains('zoe2026'));
+      expect(a.rows.first.route, '/notes/edit/3');
+
+      final none = await say(b, 'isa pa');
+      expect(none.single, isA<TextEntry>());
+      expect(ZoeLines.optionsFor(lang, ZoeSituation.ragNoMore),
+          contains((none.single as TextEntry).text));
+    });
+
+    test('"hindi yan" → iba na lang ("Baka ito? 🤔"); ulit → paumanhin, wala na', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+
+      final a = await ask(b, 'hindi yan');
+      expect(a.text, startsWith('Baka ito? 🤔'));
+      expect(a.text, contains('zoe2026'));
+      expect(a.assumption, 'Iba pang nakita (1 sa 1)');
+
+      final none = await say(b, 'hindi yan ang hinahanap ko');
+      expect(ZoeLines.optionsFor(lang, ZoeSituation.ragRejectNoMore),
+          contains((none.single as TextEntry).text));
+    });
+
+    test('"buksan mo" → bubuksan ang note (isang beses lang ang route)', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+      final open = await say(b, 'buksan mo');
+      expect((open.single as TextEntry).text, 'Sige, binubuksan ko: Wifi');
+      expect(b.takeOpen(), '/notes/edit/1');
+      expect(b.takeOpen(), isNull);
+    });
+
+    test('"buksan mo" pagkatapos ng "isa pa" → ang pangalawa ang bubuksan', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+      await ask(b, 'iba pa?');
+      await say(b, 'open it');
+      expect(b.takeOpen(), '/notes/edit/3');
+    });
+
+    test('"buksan mo" sa reminder → /reminders/edit/<id>', () async {
+      final b = brain(docsIn: [dentistNote, dentistReminder]);
+      await ask(b, 'may reminder ba ako tungkol sa dentist?');
+      final open = await say(b, 'pakibuksan');
+      expect((open.single as TextEntry).text, 'Sige, binubuksan ko: Dentist appointment');
+      expect(b.takeOpen(), '/reminders/edit/5');
+    });
+
+    test('"eh yung note?" pagkatapos ng reminder → ang note tungkol sa dentist', () async {
+      final b = brain(docsIn: [dentistNote, dentistReminder]);
+      await ask(b, 'may reminder ba ako tungkol sa dentist?');
+      final a = await ask(b, 'eh yung note?');
+      expect(a.text, contains('Dr. Santos'));
+      expect(a.rows.first.route, '/notes/edit/1');
+    });
+
+    test('"buksan mo" sa memory → walang page, ang buong sinabi na lang', () async {
+      final b = brain();
+      await ask(b, 'ano gusto ko sa umaga?');
+      final open = await say(b, 'buksan mo');
+      expect((open.single as TextEntry).text, contains('morning reminders'));
+      expect(b.takeOpen(), isNull);
+    });
+
+    test('"oo" pagkatapos ng sagot → "Ayun! 👍"', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+      final yes = await say(b, 'oo');
+      expect(ZoeLines.optionsFor(lang, ZoeSituation.ragConfirmed),
+          contains((yes.single as TextEntry).text));
+    });
+
+    test('walang nahanap + "eh yung kay papa?" → tapat pa rin, may salitang hinanap', () async {
+      final b = brain();
+      await ask(b, 'ano plate number ko?');
+      final a = await ask(b, 'eh yung kay papa?');
+      expect(a.assumption, 'Hinanap sa notes, reminders at tasks mo: plate, number, papa');
+      expect(ZoeLines.optionsFor(lang, ZoeSituation.noteNotFound), contains(a.text));
+    });
+
+    test('may ibang mensahe sa pagitan → hindi na follow-up', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+      await say(b, 'salamat');
+      final later = await say(b, 'isa pa');
+      expect(later.whereType<AnswerEntry>(), isEmpty);
+    });
+
+    test('resetSession (Clear chat) → hindi na follow-up', () async {
+      final b = brain();
+      await ask(b, 'ano wifi password ko?');
+      b.resetSession();
+      final later = await say(b, 'yung isa pa');
+      expect(later.whereType<AnswerEntry>(), isEmpty);
+    });
+
+    test('"hindi" na walang naunang paghahanap → hindi follow-up', () async {
+      final later = await say(brain(), 'hindi yan');
+      expect(later.whereType<AnswerEntry>(), isEmpty);
+    });
   });
 }
 

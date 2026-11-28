@@ -51,6 +51,24 @@ enum ZoeSituation {
   /// R4: task pero hindi sigurado → "Baka ito? 🤔 …". {item}.
   taskMaybe,
 
+  /// R5: "yung isa pa" / "iba pa?" pero wala nang iba sa nahanap.
+  ragNoMore,
+
+  /// R5: "hindi yan" at wala nang ibang nahanap → paumanhin + ibang salita.
+  ragRejectNoMore,
+
+  /// R5: "buksan mo" → binubuksan ang note / reminder / task. {title}.
+  ragOpen,
+
+  /// R5: "buksan mo" pero memory (walang hiwalay na page). {memory}.
+  ragOpenMemory,
+
+  /// R5: "buksan mo" / "isa pa" pero wala pang nahanap.
+  ragNothingToOpen,
+
+  /// R5: "oo" / "yan nga" pagkatapos ng sagot → maikling "Ayun! 👍".
+  ragConfirmed,
+
   /// RAG: "tandaan mo na mas gusto ko…" pero OFF ang long-term memory →
   /// iaalok na i-save na lang bilang note (may card pagkatapos).
   memoryOff,
@@ -427,15 +445,16 @@ class ZoeLines {
       ZoeLanguage.tagalog: ['Ito ang nakita ko sa notes mo: {note}'],
       ZoeLanguage.both: ['Ito ang nakita ko sa notes mo: {note}'],
     },
+    // R5: hinahanap na rin ang reminders + tasks (R4) → hindi na "sa notes" lang.
     ZoeSituation.noteNotFound: {
       ZoeLanguage.english: [
-        "I couldn't find that in your notes. If you tell me, I can save it.",
+        "I couldn't find that in your notes, reminders, or tasks. If you tell me, I can save it.",
       ],
       ZoeLanguage.tagalog: [
-        'Wala akong nakitang ganyan sa notes mo. Sabihin mo sa akin at ise-save ko.',
+        'Wala akong nakitang ganyan sa notes, paalala, o gawain mo. Sabihin mo sa akin at ise-save ko.',
       ],
       ZoeLanguage.both: [
-        'Wala akong nakitang ganyan sa notes mo. Sabihin mo lang at ise-save ko.',
+        'Wala akong nakitang ganyan sa notes, reminders, o tasks mo. Sabihin mo lang at ise-save ko.',
       ],
     },
     ZoeSituation.memoryFound: {
@@ -472,6 +491,51 @@ class ZoeLines {
       ZoeLanguage.english: ['Not sure, but is this it? 🤔 You have a task: {item}'],
       ZoeLanguage.tagalog: ['Baka ito? 🤔 May gawain ka: {item}'],
       ZoeLanguage.both: ['Baka ito? 🤔 May task ka: {item}'],
+    },
+    ZoeSituation.ragNoMore: {
+      ZoeLanguage.english: [
+        "That's all I found. Want to try other words?",
+        "Nothing else came up. Can you say it another way?",
+      ],
+      ZoeLanguage.tagalog: [
+        'Wala na akong ibang nakita. Subukan natin sa ibang salita?',
+        'Iyan lang ang nakita ko. Pwede mo bang sabihin sa ibang paraan?',
+      ],
+      ZoeLanguage.both: [
+        'Wala na akong ibang nakita. Try natin sa ibang words?',
+        'Iyan lang ang na-find ko. Pwede mo bang sabihin in another way?',
+      ],
+    },
+    ZoeSituation.ragRejectNoMore: {
+      ZoeLanguage.english: [
+        "Sorry about that! I don't have another match — can you say it another way?",
+      ],
+      ZoeLanguage.tagalog: [
+        'Ay, pasensya! Wala na akong ibang nakita — pwede mo bang sabihin sa ibang salita?',
+      ],
+      ZoeLanguage.both: [
+        'Ay, sorry! Wala na akong ibang nakita — pwede mo bang sabihin sa ibang words?',
+      ],
+    },
+    ZoeSituation.ragOpen: {
+      ZoeLanguage.english: ['Opening it: {title}'],
+      ZoeLanguage.tagalog: ['Sige, binubuksan ko: {title}'],
+      ZoeLanguage.both: ['Sige, opening na: {title}'],
+    },
+    ZoeSituation.ragOpenMemory: {
+      ZoeLanguage.english: ["There's no separate page for that, but this is what you told me: {memory}"],
+      ZoeLanguage.tagalog: ['Wala itong hiwalay na page, pero ito ang buong sinabi mo: {memory}'],
+      ZoeLanguage.both: ['Walang hiwalay na page para diyan, pero ito ang sinabi mo: {memory}'],
+    },
+    ZoeSituation.ragNothingToOpen: {
+      ZoeLanguage.english: ["I haven't found anything yet. What should I look for?"],
+      ZoeLanguage.tagalog: ['Wala pa akong nahanap. Ano ang hahanapin ko?'],
+      ZoeLanguage.both: ['Wala pa akong nahanap. Ano ang hahanapin ko?'],
+    },
+    ZoeSituation.ragConfirmed: {
+      ZoeLanguage.english: ['Great, found it! 👍', 'Glad that was it! 👍'],
+      ZoeLanguage.tagalog: ['Ayun! Buti nahanap natin. 👍', 'Ayos! 👍'],
+      ZoeLanguage.both: ['Ayun! Buti nahanap natin. 👍', 'Nice, goods! 👍'],
     },
     ZoeSituation.memoryOff: {
       ZoeLanguage.english: [

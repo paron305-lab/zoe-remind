@@ -8,12 +8,14 @@ import 'package:zoe_remind/ai/parser/text_normalizer.dart';
 import 'package:zoe_remind/ai/parser/when_parser.dart';
 import 'package:zoe_remind/core/constants/zoe_language.dart';
 import 'package:zoe_remind/core/utils/zoe_date.dart';
+import 'package:zoe_remind/database/models/note.dart';
 import 'package:zoe_remind/database/models/reminder_occurrence.dart';
 import 'package:zoe_remind/database/repositories/memory_repository.dart';
 import 'package:zoe_remind/database/repositories/reminder_repository.dart';
 import 'package:zoe_remind/database/repositories/settings_repository.dart';
 import 'package:zoe_remind/database/repositories/task_repository.dart';
 import 'package:zoe_remind/features/chat/controllers/chat_router.dart';
+import 'package:zoe_remind/features/chat/controllers/context_replies.dart';
 import 'package:zoe_remind/features/chat/models/chat_drafts.dart';
 import 'package:zoe_remind/features/chat/models/chat_entry.dart';
 import 'package:zoe_remind/features/companion/controllers/companion_lines.dart';
@@ -34,6 +36,7 @@ import 'package:zoe_remind/memory/memory_recall.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
 import 'package:zoe_remind/rag/history_query.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
+import 'package:zoe_remind/rag/rag_session.dart';
 import 'package:zoe_remind/rag/retriever.dart';
 import 'package:zoe_remind/rag/search_misses.dart';
 import 'package:zoe_remind/rag/snippet.dart';
@@ -68,6 +71,10 @@ import 'package:zoe_remind/rag/snippet.dart';
 ///      R4: pati reminders + tasks — "may reminder ba ako tungkol sa dentist?"
 ///      → "May reminder ka: Dentist appointment — Dec 3, 3:00 PM". Ang mga
 ///      source ay naka-grupo ayon sa uri (⏰ reminders, ✅ tasks, 📝 notes…).
+///      R5: follow-up pagkatapos ng sagot (RagSession, RAM lang):
+///        "eh kay papa?" → "gamot papa" · "yung isa pa" → susunod na nahanap
+///        "hindi yan" → iba na lang / tapat na "wala na" · "buksan mo" → bubuksan
+///        "oo" / "yan nga" → "Ayun! 👍".
 ///  10. Memories (B5): "tandaan mo na mas gusto ko ng morning reminders" →
 ///      memory card (Accept muna). OFF ang long-term memory → note card na lang.
 ///      Data ("tandaan mo, wifi password ay…") → note pa rin (MemoryRules).
@@ -202,6 +209,14 @@ class ChatPreviewBrain {
   /// "ano na-miss ko?" = ilang araw pabalik (kasama ngayon).
   static const missedDays = 7;
 
+  /// R5: ang huling paghahanap (para sa "eh kay papa?", "yung isa pa",
+  /// "buksan mo", "hindi yan"). null = walang naunang paghahanap, o may
+  /// ibang mensahe na sa pagitan.
+  RagSession? _session;
+
+  /// R5: "buksan mo" → ang route na bubuksan ng screen ([takeOpen]).
+  String? _openRoute;
+
   ZoeLanguage _lang = ZoeLanguage.both;
 
   /// Mood na gagamitin sa sagot na ito (kinukuha isang beses kada reply).
@@ -245,6 +260,7 @@ class ChatPreviewBrain {
     // Walang card, walang Qwen, walang ibang rule na makakasapaw,
     // at hindi ito ginagawang mood event.
     if (CrisisGuard.matches(text)) {
+      resetSession();
       return [
         TextEntry(
           fromZoe: true,
@@ -254,6 +270,17 @@ class ChatPreviewBrain {
     }
 
     if (lower == 'test error') throw StateError('UI preview error');
+
+    // R5: maikling follow-up sa huling paghahanap ("eh kay papa?", "yung isa pa",
+    // "buksan mo", "hindi yan"). Isang beses lang ang session: kapag hindi
+    // follow-up ang mensaheng ito, nawawala na (ibabalik lang ng bagong search).
+    _openRoute = null;
+    final session = _session;
+    _session = null;
+    if (session != null && session.isFresh(_now())) {
+      final follow = await _followUp(session, text);
+      if (follow != null) return follow;
+    }
 
     // Level 3: ano'ng alam ni Zoe tungkol sa user + ang mga linya niya.
     _profile = await _profileSafe();
@@ -693,8 +720,8 @@ class ChatPreviewBrain {
   // ───────────────────────── Reads (answer cards) ─────────────────────────
   // Deterministic code ang nagbabasa ng SQLite — ganito rin sa Memory Engine.
 
-  /// "ano locker code ko?" → Retriever (notes + memories, FTS4).
-  /// Ang note / memory mismo ang ipinapakita — walang iniimbento si Zoe.
+  /// "ano locker code ko?" → Retriever (notes + memories + reminders + tasks).
+  /// Ang note / memory / item mismo ang ipinapakita — walang iniimbento si Zoe.
   /// Rows = mga source (hanggang 3), napipindot para buksan.
   ///
   /// R2: sigurado → "Ito ang nakita ko…" · hindi sigurado → "Baka ito? 🤔 …"
@@ -703,57 +730,97 @@ class ChatPreviewBrain {
   ///
   /// [words] (B6) = mga salitang pinili ni Qwen MULA sa mensahe ("gamot, mama").
   /// Iyon ang hahanapin; kapag wala, ang buong tanong ulit.
+  ///
+  /// R5: hanggang [RagSession.keep] ang tinatandaan (para sa "yung isa pa").
   Future<ChatEntry> _searchNotes(String lower, {List<String> words = const []}) async {
     final useMemories = await _memoryOnSafe();
-    Future<List<RetrievalHit>> find(String q) async {
-      try {
-        return await _retriever.search(q, includeMemories: useMemories, limit: 3);
-      } catch (_) {
-        return const [];
-      }
-    }
-
     var query = words.isEmpty ? lower : words.join(' ');
-    var hits = await find(query);
+    var hits = await _find(query, useMemories);
     if (hits.isEmpty && words.isNotEmpty) {
       query = lower;
-      hits = await find(lower);
+      hits = await _find(lower, useMemories);
     }
+    return _searchResult(query, hits, miss: lower, searched: words);
+  }
+
+  /// Retriever; pumalya → walang nahanap (hindi nagka-crash ang chat).
+  Future<List<RetrievalHit>> _find(String q, bool useMemories) async {
+    try {
+      return await _retriever.search(q, includeMemories: useMemories, limit: RagSession.keep);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Sagot mula sa nahanap + bagong [RagSession].
+  /// [miss] = itatala sa "Hindi nahanap" (Developer) kapag walang nahanap.
+  /// [searched] = mga salitang ipapakita sa chip ("Hinanap…: gamot, mama").
+  /// [swapped] (R5) = galing sa "eh kay papa?" → ipinapakita ang hinanap.
+  ChatEntry _searchResult(
+    String query,
+    List<RetrievalHit> hits, {
+    required String miss,
+    List<String> searched = const [],
+    bool swapped = false,
+  }) {
+    _session = RagSession(query: query, hits: hits, at: _now());
 
     if (hits.isEmpty) {
       // B6: para makita sa Developer kung anong tanong ang pumapalya (RAM lang).
-      SearchMisses.record(lower);
+      SearchMisses.record(miss);
+      // R5: hindi na "sa notes" lang — kasama ang reminders + tasks (R4).
+      final where =
+          _t('Searched your notes, reminders and tasks', 'Hinanap sa notes, reminders at tasks mo');
       return AnswerEntry(
-        assumption: words.isEmpty
-            ? _t('Searched your notes', 'Hinanap sa notes mo')
-            : _t('Searched your notes for: ${words.join(', ')}',
-                'Hinanap sa notes mo: ${words.join(', ')}'),
+        assumption: searched.isEmpty ? where : '$where: ${searched.join(', ')}',
         text: _say(ZoeSituation.noteNotFound),
       );
     }
 
-    final top = hits.first;
+    return _answerFor(
+      hits.first,
+      query,
+      hits.take(3).toList(),
+      note: swapped && searched.isNotEmpty
+          ? '${_t('searched', 'hinanap')}: ${searched.join(', ')}'
+          : null,
+    );
+  }
+
+  /// Ang sagot para sa [top] (note, memory, reminder o task).
+  /// [rowHits] = mga source sa ilalim (naka-grupo ayon sa uri).
+  /// [forceMaybe] (R5) = "hindi yan" → ang susunod ay laging "Baka ito? 🤔".
+  /// [label] (R5) = kapalit ng chip ("Iba pang nakita (2 sa 3)").
+  /// [note] (R5) = idinudugtong sa chip ("Galing sa notes mo · hinanap: gamot, papa").
+  AnswerEntry _answerFor(
+    RetrievalHit top,
+    String query,
+    List<RetrievalHit> rowHits, {
+    bool forceMaybe = false,
+    String? label,
+    String? note,
+  }) {
     final best = top.doc;
+    final sure = top.isSure && !forceMaybe;
     // R4: mga source, naka-grupo ayon sa uri (ang uri ng sagot muna).
-    final rows = _groupedRows(hits);
-    if (best.isItem) return _itemAnswer(top, query, rows);
+    final rows = _groupedRows(rowHits);
+    final chip = label ?? (note == null ? _sourceLabel(best) : '${_sourceLabel(best)} · $note');
+    if (best.isItem) return _itemAnswer(top, query, rows, sure: sure, chip: chip);
 
     // R3: ang linyang tumama lang (naka-bold ang mga salita ng tanong),
     // hindi na ang unang 300 letra ng buong note.
     final snip = Snippet.of(best.text, query);
     final ZoeSituation line;
     if (best.isMemory) {
-      line = top.isSure ? ZoeSituation.memoryFound : ZoeSituation.memoryMaybe;
+      line = sure ? ZoeSituation.memoryFound : ZoeSituation.memoryMaybe;
     } else {
-      line = top.isSure ? ZoeSituation.noteFound : ZoeSituation.noteMaybe;
+      line = sure ? ZoeSituation.noteFound : ZoeSituation.noteMaybe;
     }
     final text = _say(line, best.isMemory ? {'memory': snip.text} : {'note': snip.text});
     // Nasa dulo ng linya ang {note} / {memory} → doon ang bold.
     final at = snip.isEmpty ? -1 : text.lastIndexOf(snip.text);
     return AnswerEntry(
-      assumption: best.isMemory
-          ? _t('From what you told me', 'Galing sa sinabi mo sa akin')
-          : _t('From your notes', 'Galing sa notes mo'),
+      assumption: chip,
       text: text,
       bold: at < 0 ? const [] : snip.shift(at).bold,
       more: snip.partial && !best.isMemory
@@ -763,30 +830,162 @@ class ChatPreviewBrain {
     );
   }
 
+  /// "Galing sa notes mo" / "Galing sa sinabi mo sa akin" / "Galing sa reminders mo"…
+  String _sourceLabel(RetrievalDoc d) => switch (d.source) {
+        RetrievalSource.note => _t('From your notes', 'Galing sa notes mo'),
+        RetrievalSource.memory => _t('From what you told me', 'Galing sa sinabi mo sa akin'),
+        RetrievalSource.reminder => _t('From your reminders', 'Galing sa reminders mo'),
+        RetrievalSource.task => _t('From your tasks', 'Galing sa tasks mo'),
+      };
+
   /// R4: reminder / task ang sagot.
   ///   "May reminder ka: **Dentist** appointment — Dec 3, 3:00 PM"
   ///   "May task ka: Ayusin ang **resume** — walang petsa"
   /// Naka-bold ang salita ng tanong sa title. Ang row ang nagbubukas ng item.
-  AnswerEntry _itemAnswer(RetrievalHit top, String query, List<AnswerRow> rows) {
+  AnswerEntry _itemAnswer(
+    RetrievalHit top,
+    String query,
+    List<AnswerRow> rows, {
+    required bool sure,
+    required String chip,
+  }) {
     final d = top.doc;
     final reminder = d.source == RetrievalSource.reminder;
     final snip = Snippet.of(d.title, query);
     final item = '${snip.text} — ${_itemWhen(d)}';
     final ZoeSituation line;
     if (reminder) {
-      line = top.isSure ? ZoeSituation.reminderFound : ZoeSituation.reminderMaybe;
+      line = sure ? ZoeSituation.reminderFound : ZoeSituation.reminderMaybe;
     } else {
-      line = top.isSure ? ZoeSituation.taskFound : ZoeSituation.taskMaybe;
+      line = sure ? ZoeSituation.taskFound : ZoeSituation.taskMaybe;
     }
     final text = _say(line, {'item': item});
     final at = snip.isEmpty ? -1 : text.lastIndexOf(item);
     return AnswerEntry(
-      assumption: reminder
-          ? _t('From your reminders', 'Galing sa reminders mo')
-          : _t('From your tasks', 'Galing sa tasks mo'),
+      assumption: chip,
       text: text,
       bold: at < 0 ? const [] : snip.shift(at).bold,
       rows: rows,
+    );
+  }
+
+  // ───────────────────────── R5: follow-up ─────────────────────────
+
+  /// Follow-up sa [s] ("eh kay papa?", "yung isa pa", "hindi yan", "buksan mo",
+  /// "oo"). null = hindi follow-up → normal na reply.
+  Future<List<ChatEntry>?> _followUp(RagSession s, String text) async {
+    final follow = RagFollowUp.read(text);
+    if (follow == null) {
+      // "oo" / "yan nga" / "tama" pagkatapos ng sagot → "Ayun! 👍".
+      // (R6: ise-save ito bilang "tama ang sagot".)
+      if (s.hasHits && ContextReplies.isYes(text)) {
+        _session = s;
+        return [TextEntry(fromZoe: true, text: _say(ZoeSituation.ragConfirmed))];
+      }
+      return null;
+    }
+    switch (follow.kind) {
+      case FollowUpKind.more:
+        if (!s.hasHits) {
+          _session = s;
+          return [TextEntry(fromZoe: true, text: _say(ZoeSituation.ragNothingToOpen))];
+        }
+        return [_nextAnswer(s, rejected: false)];
+      case FollowUpKind.reject:
+        // "hindi" sa "wala akong nakita" → hindi tungkol sa sagot; normal na reply.
+        if (!s.hasHits) return null;
+        return [_nextAnswer(s, rejected: true)];
+      case FollowUpKind.open:
+        return [_openCurrent(s)];
+      case FollowUpKind.swap:
+        // "salamat naman", "ayos naman", "kumusta si mama?" → hindi paghahanap.
+        // "eh yung task?" → askKind sa router ("task" lang) — pero kung walang
+        // oras / araw, follow-up ito ng paghahanap, hindi bagong task.
+        final route = ChatRouter.of(text);
+        final lower = ChatRouter.clean(text);
+        final noWhen = parseTime(lower) == null && _day(lower) == null;
+        final fits = route.route == ZoeRoute.unknown ||
+            route.route == ZoeRoute.search ||
+            (route.route == ZoeRoute.askKind && noWhen);
+        if (!fits || route.tone != UserTone.neutral) return null;
+        return [await _swapSearch(s, text)];
+    }
+  }
+
+  /// "yung isa pa" / "hindi yan" → ang susunod na nahanap (hindi pa tinanggihan).
+  /// Wala na → tapat na "wala na akong ibang nakita".
+  ChatEntry _nextAnswer(RagSession s, {required bool rejected}) {
+    final current = s.current;
+    if (rejected && current != null) s.rejected.add(RagSession.keyOf(current.doc));
+    _session = s;
+    final next = s.nextIndex();
+    if (next == null) {
+      return TextEntry(
+        fromZoe: true,
+        text: _say(rejected ? ZoeSituation.ragRejectNoMore : ZoeSituation.ragNoMore),
+      );
+    }
+    s.shown = next;
+    final (pos, total) = s.positionOf(next);
+    return _answerFor(
+      s.hits[next],
+      s.query,
+      s.remainingFrom(next).take(3).toList(),
+      forceMaybe: rejected,
+      label: _t('Another match ($pos of $total)', 'Iba pang nakita ($pos sa $total)'),
+    );
+  }
+
+  /// "buksan mo" → ang ipinapakita ngayon. Note / reminder / task → route para
+  /// sa screen ([takeOpen]). Memory → walang page, ang buong sinabi na lang.
+  ChatEntry _openCurrent(RagSession s) {
+    _session = s;
+    final hit = s.current;
+    if (hit == null) {
+      return TextEntry(fromZoe: true, text: _say(ZoeSituation.ragNothingToOpen));
+    }
+    final d = hit.doc;
+    if (d.isMemory) {
+      return TextEntry(fromZoe: true, text: _say(ZoeSituation.ragOpenMemory, {'memory': d.text}));
+    }
+    _openRoute = _sourceRow(d).route;
+    final title = d.isNote ? Note.titleFrom(d.title, d.text) : d.title;
+    return TextEntry(fromZoe: true, text: _say(ZoeSituation.ragOpen, {'title': title}));
+  }
+
+  /// "eh kay papa?" → pagsamahin sa huling tanong (RagFollowUp.swapQueries),
+  /// hanapin lahat ng posibilidad, at piliin ang pinakamagandang sagot:
+  /// ibang item kaysa sa ipinakita na (ibang tao / bagay ang tinatanong),
+  /// sigurado, mas maraming tumama. Pare-pareho → ang mas maagang posibilidad.
+  Future<ChatEntry> _swapSearch(RagSession s, String text) async {
+    final queries = RagFollowUp.swapQueries(s.query, text);
+    final lower = ChatRouter.clean(text);
+    if (queries.isEmpty) return _searchNotes(lower);
+
+    final useMemories = await _memoryOnSafe();
+    final shown = s.current == null ? null : RagSession.keyOf(s.current!.doc);
+    var bestQuery = queries.first;
+    var bestHits = const <RetrievalHit>[];
+    var bestScore = -1.0;
+    for (final q in queries) {
+      final hits = await _find(q, useMemories);
+      if (hits.isEmpty) continue;
+      final top = hits.first;
+      final score = (RagSession.keyOf(top.doc) != shown ? 2.0 : 0.0) +
+          (top.isSure ? 1.0 : 0.0) +
+          top.coverage * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        bestQuery = q;
+        bestHits = hits;
+      }
+    }
+    return _searchResult(
+      bestQuery,
+      bestHits,
+      miss: bestQuery,
+      searched: bestQuery.split(' '),
+      swapped: true,
     );
   }
 
@@ -1185,6 +1384,21 @@ class ChatPreviewBrain {
 
   /// Ngayon (para sa ContextReplies sa controller).
   DateTime get now => _now();
+
+  /// R5: kalimutan ang huling paghahanap ("Clear chat", o sumagot ang user
+  /// sa card / tanong — hindi na follow-up ang susunod).
+  void resetSession() {
+    _session = null;
+    _openRoute = null;
+  }
+
+  /// R5: ang route na dapat buksan pagkatapos ng sagot ("buksan mo"), o null.
+  /// Isang beses lang — nabubura pagkakuha.
+  String? takeOpen() {
+    final r = _openRoute;
+    _openRoute = null;
+    return r;
+  }
 
   /// "Zoe, remind me tomorrow at 7 PM to review my thesis" → "Review my thesis"
   String _cleanTitle(String text) {

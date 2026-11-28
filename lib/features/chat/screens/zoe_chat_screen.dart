@@ -66,6 +66,9 @@ class _ZoeChatScreenState extends State<ZoeChatScreen> {
     // "oo" / "sige" sa card → na-accept na; i-check ang alarm permissions.
     final accepted = await _chat.send(text);
     if (accepted != null) await _afterSave(accepted);
+    // R5: "buksan mo" pagkatapos ng sagot → buksan ang note / reminder / task.
+    final open = _chat.takeOpenRoute();
+    if (open != null && mounted) await context.push(open);
   }
 
   /// "Remind me…" → ilagay sa input. Buong tanong → i-send agad.

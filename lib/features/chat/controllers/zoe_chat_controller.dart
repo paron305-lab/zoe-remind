@@ -67,6 +67,9 @@ class ZoeChatController extends ChangeNotifier {
   /// Nag-error ang huling sagot → "sorry" si Zoe hanggang sa susunod na maayos.
   bool _failedBefore = false;
 
+  /// R5: "buksan mo" → route na bubuksan ng screen pagkatapos ng sagot.
+  String? _openRoute;
+
   // ───────────────────────── Lifecycle ─────────────────────────
 
   Future<void> init() async {
@@ -163,7 +166,10 @@ class ZoeChatController extends ChangeNotifier {
     // (Pananakit sa sarili → laging crisis reply, hindi ito.)
     if (card != null && !CrisisGuard.matches(text)) {
       final handled = await _cardReply(card, text);
-      if (handled != null) return handled.accepted;
+      if (handled != null) {
+        _brain.resetSession(); // R5: sagot sa card, hindi follow-up ng search
+        return handled.accepted;
+      }
     }
 
     // May hinihintay bang sagot si Zoe (uri / title / oras)?
@@ -172,12 +178,21 @@ class ZoeChatController extends ChangeNotifier {
       pending.answered = true;
       final next = await _answerClarify(pending, text);
       if (next != null) {
+        _brain.resetSession();
         await _zoeSays(next);
         return null;
       }
     }
     await _respond(text);
     return null;
+  }
+
+  /// R5: ang route na dapat buksan ng screen ("buksan mo"), o null.
+  /// Isang beses lang — nabubura pagkakuha.
+  String? takeOpenRoute() {
+    final r = _openRoute;
+    _openRoute = null;
+    return r;
   }
 
   /// Ang pinakahuling entry ay card na naghihintay ng Accept? (Info pills ay nilalaktawan.)
@@ -244,6 +259,8 @@ class ZoeChatController extends ChangeNotifier {
         Future<void>.delayed(const Duration(milliseconds: 700)),
       ]);
       reply = results.first as List<ChatEntry>;
+      // R5: "buksan mo" → bubuksan ng screen ang note / reminder / task.
+      _openRoute = _brain.takeOpen();
       if (_failedBefore) {
         // Nakasagot na ulit nang maayos (ang sagot na ito ay "Sorry kanina…"
         // pa kung bati) → tapos na ang sorry mood.
@@ -362,6 +379,9 @@ class ZoeChatController extends ChangeNotifier {
     for (final e in entries.reversed) {
       if (e is ClarifyEntry && !e.answered) return e;
       if (e is ConfirmEntry) return null; // may mas bago nang card
+      // R5: may sagot na (search) pagkatapos ng tanong → luma na ang tanong;
+      // ang "hindi yan" / "isa pa" ay para sa sagot, hindi sa tanong.
+      if (e is AnswerEntry) return null;
     }
     return null;
   }
@@ -428,6 +448,7 @@ class ZoeChatController extends ChangeNotifier {
     if (c.asksHelp) return pickHelp(c, chip);
     if (c.answered || !c.asksKind || chip.isTime) return;
     c.answered = true;
+    _brain.resetSession();
     entries.add(TextEntry(fromZoe: false, text: chip.label));
     _notify();
     unawaited(_save('user', chip.label));
@@ -456,6 +477,7 @@ class ZoeChatController extends ChangeNotifier {
   Future<void> pickHelp(ClarifyEntry c, ClarifyChip chip) async {
     if (c.answered || !c.asksHelp) return;
     c.answered = true;
+    _brain.resetSession();
     entries.add(TextEntry(fromZoe: false, text: chip.label));
     _notify();
     unawaited(_save('user', chip.label));
@@ -498,6 +520,7 @@ class ZoeChatController extends ChangeNotifier {
   Future<void> pickTime(ClarifyEntry c, TimeOfDay time) async {
     if (c.answered || c.reminder == null) return;
     c.answered = true;
+    _brain.resetSession();
     final label = ZoeDate.prettyTime(time);
     entries.add(TextEntry(fromZoe: false, text: label));
     _notify();
@@ -749,6 +772,7 @@ class ZoeChatController extends ChangeNotifier {
   void clearChat() {
     entries.clear();
     _conversationId = null;
+    _brain.resetSession(); // R5: walang follow-up sa bagong chat
     _notify();
   }
 
