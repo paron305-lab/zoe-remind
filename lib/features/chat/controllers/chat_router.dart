@@ -7,6 +7,7 @@ import 'package:zoe_remind/features/companion/controllers/zoe_lines.dart';
 import 'package:zoe_remind/features/companion/models/user_tone.dart';
 import 'package:zoe_remind/memory/companion_facts.dart';
 import 'package:zoe_remind/memory/memory_rules.dart';
+import 'package:zoe_remind/rag/search_scope.dart';
 
 /// Saan pupunta ang mensahe (pagkatapos ng CrisisGuard at math).
 enum ZoeRoute {
@@ -31,9 +32,10 @@ enum ZoeRoute {
   note,
 
   /// Tanong tungkol sa na-save ("ano wifi password ko?") → RAG.
+  /// R4: pati "may reminder ba ako tungkol sa dentist?" (reminders + tasks).
   search,
 
-  /// "ano gagawin ko today?", "busy ba ako bukas?"
+  /// "ano gagawin ko today?", "busy ba ako bukas?", "ano mga reminders ko bukas?"
   today,
 
   /// "ano natapos ko kahapon?"
@@ -86,6 +88,10 @@ class ChatRoute {
 ///   5. askKind     hindi sigurado ang reminder / task ("meeting 3pm bukas")
 ///                  (pagod + "kailangan kong…" → feeling, hindi tanong)
 ///   6. intent      malinaw na utos / tanong → card o sagot
+///      R4: tanong tungkol sa reminder / task NA MAY PAKSA
+///      ("may reminder ba ako tungkol sa dentist?", "may task ba akong
+///      maglinis ng kwarto?") → search, hindi schedule. Walang paksa
+///      ("ano mga reminders ko bukas?") → schedule pa rin.
 ///
 /// Ginagamit ng [ChatPreviewBrain.reply], at ng phrase-bank test
 /// (`flutter test test/ai/phrase_bank_test.dart`) — kaya iisa ang patakaran.
@@ -162,6 +168,15 @@ class ChatRouter {
       // "pagod na ako, kailangan ko pang tapusin to" → nagkukuwento, hindi utos.
       if (feeling && tone.isDown) return ChatRoute(ZoeRoute.feeling, intent, tone);
       return ChatRoute(ZoeRoute.askKind, intent, tone, memoryChip: MemoryRules.hasTrigger(lower));
+    }
+
+    // R4: "may reminder ba ako tungkol sa dentist?" → hanapin ang reminder,
+    // hindi ang schedule ngayong araw. (SearchScope.asksAboutItem: may
+    // salitang reminder / task + may paksa na hindi oras / listahan.)
+    if (intent == ZoeIntent.getToday &&
+        IntentRules.isQuestion(lower) &&
+        SearchScope.asksAboutItem(lower)) {
+      return ChatRoute(ZoeRoute.search, ZoeIntent.searchNotes, tone);
     }
 
     final route = switch (intent) {

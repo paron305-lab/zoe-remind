@@ -3,6 +3,7 @@ import 'package:zoe_remind/database/database.dart';
 import 'package:zoe_remind/rag/query_terms.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
+import 'package:zoe_remind/rag/search_scope.dart';
 import 'package:zoe_remind/rag/search_misses.dart';
 
 /// Developer › "Search index (RAG)": gumagana ba ang FTS4 sa phone na ito,
@@ -11,6 +12,8 @@ import 'package:zoe_remind/rag/search_misses.dart';
 /// B6: ipinapakita rin ang tokenizer (unicode61 o simple), at ang mga tanong
 /// sa chat na walang nahanap (sa session na ito lang, hindi sine-save) —
 /// para malaman kung anong synonyms ang idadagdag sa query_terms.dart.
+/// R4: kasama ang reminders (⏰) at tasks (✅) sa resulta, at ipinapakita kung
+/// saan hinanap ("reminder lang" kapag binanggit sa tanong).
 class SearchCheckCard extends StatefulWidget {
   const SearchCheckCard({super.key});
 
@@ -27,6 +30,7 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
   bool _busy = false;
   final _query = TextEditingController(text: 'ano wifi password ko?');
   String _terms = '';
+  String _scope = '';
   List<RetrievalHit>? _hits;
 
   @override
@@ -40,8 +44,10 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
     try {
       final hits = await Retriever().search(q, limit: 5);
       if (!mounted) return;
+      final scope = SearchScope.of(q);
       setState(() {
         _terms = QueryTerms.parse(q).join(', ');
+        _scope = scope.isScoped ? '${scope.kinds!.map((k) => k.name).join(' + ')} muna' : 'lahat';
         _hits = hits;
       });
     } catch (e) {
@@ -139,12 +145,13 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
             if (_hits != null) ...[
               const SizedBox(height: 6),
               Text('salita: ${_terms.isEmpty ? '—' : _terms}', style: const TextStyle(fontSize: 12)),
+              Text('saan: $_scope', style: const TextStyle(fontSize: 12)),
               if (_hits!.isEmpty)
                 const Text('Walang nahanap', style: TextStyle(fontSize: 13, color: _coral)),
               // R2: score (BM25-style) · coverage · sigurado o "baka".
               for (final h in _hits!)
                 Text(
-                  '${h.doc.isMemory ? '💜' : '📝'} ${h.doc.title} · '
+                  '${_icon(h.doc.source)} ${h.doc.title} · '
                   'score ${h.score.toStringAsFixed(2)} · ${(h.coverage * 100).round()}% · '
                   '${h.isSure ? 'sigurado' : 'baka 🤔'} (${h.matched} salita)',
                   style: const TextStyle(fontSize: 13),
@@ -160,6 +167,13 @@ class _SearchCheckCardState extends State<SearchCheckCard> {
       ),
     );
   }
+
+  static String _icon(RetrievalSource s) => switch (s) {
+        RetrievalSource.note => '📝',
+        RetrievalSource.memory => '💜',
+        RetrievalSource.reminder => '⏰',
+        RetrievalSource.task => '✅',
+      };
 
   /// "Hindi nahanap sa chat" — mga tanong na walang sagot (RAM lang).
   Widget _misses() {

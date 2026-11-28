@@ -65,6 +65,9 @@ import 'package:zoe_remind/rag/snippet.dart';
 ///   9. RAG (Phase B): "ano wifi password ko?" → Retriever (FTS4 sa notes +
 ///      memories). Ang sagot ay ang note / memory MISMO + ang mga source
 ///      ("📝 Galing sa notes mo" + hanggang 3 note). Walang iniimbento si Zoe.
+///      R4: pati reminders + tasks — "may reminder ba ako tungkol sa dentist?"
+///      → "May reminder ka: Dentist appointment — Dec 3, 3:00 PM". Ang mga
+///      source ay naka-grupo ayon sa uri (⏰ reminders, ✅ tasks, 📝 notes…).
 ///  10. Memories (B5): "tandaan mo na mas gusto ko ng morning reminders" →
 ///      memory card (Accept muna). OFF ang long-term memory → note card na lang.
 ///      Data ("tandaan mo, wifi password ay…") → note pa rin (MemoryRules).
@@ -731,6 +734,10 @@ class ChatPreviewBrain {
 
     final top = hits.first;
     final best = top.doc;
+    // R4: mga source, naka-grupo ayon sa uri (ang uri ng sagot muna).
+    final rows = _groupedRows(hits);
+    if (best.isItem) return _itemAnswer(top, query, rows);
+
     // R3: ang linyang tumama lang (naka-bold ang mga salita ng tanong),
     // hindi na ang unang 300 letra ng buong note.
     final snip = Snippet.of(best.text, query);
@@ -752,17 +759,137 @@ class ChatPreviewBrain {
       more: snip.partial && !best.isMemory
           ? AnswerLink(_t('Full note →', 'Buong note →'), '/notes/edit/${best.id}')
           : null,
-      rows: [for (final h in hits) _sourceRow(h.doc)],
+      rows: rows,
     );
   }
 
-  /// "📝 Wifi · Nov 18" → bubukas ang note. "💜 Mas gusto ko… · Nov 2" → hindi
+  /// R4: reminder / task ang sagot.
+  ///   "May reminder ka: **Dentist** appointment — Dec 3, 3:00 PM"
+  ///   "May task ka: Ayusin ang **resume** — walang petsa"
+  /// Naka-bold ang salita ng tanong sa title. Ang row ang nagbubukas ng item.
+  AnswerEntry _itemAnswer(RetrievalHit top, String query, List<AnswerRow> rows) {
+    final d = top.doc;
+    final reminder = d.source == RetrievalSource.reminder;
+    final snip = Snippet.of(d.title, query);
+    final item = '${snip.text} — ${_itemWhen(d)}';
+    final ZoeSituation line;
+    if (reminder) {
+      line = top.isSure ? ZoeSituation.reminderFound : ZoeSituation.reminderMaybe;
+    } else {
+      line = top.isSure ? ZoeSituation.taskFound : ZoeSituation.taskMaybe;
+    }
+    final text = _say(line, {'item': item});
+    final at = snip.isEmpty ? -1 : text.lastIndexOf(item);
+    return AnswerEntry(
+      assumption: reminder
+          ? _t('From your reminders', 'Galing sa reminders mo')
+          : _t('From your tasks', 'Galing sa tasks mo'),
+      text: text,
+      bold: at < 0 ? const [] : snip.shift(at).bold,
+      rows: rows,
+    );
+  }
+
+  /// R4: mga source, naka-grupo ayon sa uri. Ang uri ng unang sagot muna,
+  /// tapos ang iba ayon sa pagkakasunod nila sa resulta.
+  List<AnswerRow> _groupedRows(List<RetrievalHit> hits) {
+    final order = <RetrievalSource>[];
+    for (final h in hits) {
+      if (!order.contains(h.doc.source)) order.add(h.doc.source);
+    }
+    return [
+      for (final source in order)
+        for (final h in hits)
+          if (h.doc.source == source) _sourceRow(h.doc),
+    ];
+  }
+
+  /// "📝 Wifi · Nov 18" → bubuksan ang note. "💜 Mas gusto ko… · Nov 2" → hindi
   /// napipindot (walang listahan ng memories sa app — ON/OFF lang sa Settings).
-  AnswerRow _sourceRow(RetrievalDoc d) => AnswerRow(
-        d.isMemory ? AnswerTone.memory : AnswerTone.note,
-        '${d.title} · ${ZoeDate.short(d.updatedAt)}',
-        route: d.isMemory ? null : '/notes/edit/${d.id}',
-      );
+  /// R4: "⏰ Dentist appointment · Dec 3" → bubuksan ang reminder (read-only
+  /// kapag tapos na) · "✅ Ayusin ang resume · walang petsa" → bubuksan ang task.
+  AnswerRow _sourceRow(RetrievalDoc d) => switch (d.source) {
+        RetrievalSource.note => AnswerRow(
+            AnswerTone.note,
+            '${d.title} · ${ZoeDate.short(d.updatedAt)}',
+            route: '/notes/edit/${d.id}',
+          ),
+        RetrievalSource.memory => AnswerRow(
+            AnswerTone.memory,
+            '${d.title} · ${ZoeDate.short(d.updatedAt)}',
+          ),
+        RetrievalSource.reminder => AnswerRow(
+            AnswerTone.reminder,
+            '${d.title} · ${_itemWhen(d, short: true)}',
+            route: d.done ? '/reminders/edit/${d.id}?view=1' : '/reminders/edit/${d.id}',
+          ),
+        RetrievalSource.task => AnswerRow(
+            d.done ? AnswerTone.done : AnswerTone.event,
+            '${d.title} · ${_itemWhen(d, short: true)}',
+            route: '/tasks/edit/${d.id}',
+          ),
+      };
+
+  /// R4: kailan ang reminder / task, ayon sa language.
+  ///   reminder: "Dec 3, 3:00 PM" · "araw-araw, 8:00 AM" / "every day, 8:00 AM"
+  ///             · "tuwing Lunes, 7:00 PM" · "buwan-buwan (ika-15), 9:00 AM"
+  ///             · tapos na (one-time) → "Dec 3, 3:00 PM (tapos na ✓)"
+  ///   task:     "Dec 5, 9:00 AM" · "walang petsa" / "no date" · "tapos na ✓"
+  /// [short] = para sa row (walang oras).
+  String _itemWhen(RetrievalDoc d, {bool short = false}) {
+    final day = _parseDay(d.date);
+    final time = short ? null : _parseTime(d.time);
+    final doneMark = _t('done ✓', 'tapos na ✓');
+
+    if (d.source == RetrievalSource.task) {
+      if (d.done) return doneMark;
+      if (day == null) return _t('no date', 'walang petsa');
+      return [ZoeDate.short(day), if (time != null) time].join(', ');
+    }
+
+    final String? span;
+    switch (d.repeat) {
+      case 'daily':
+        span = _t('every day', 'araw-araw');
+      case 'weekly':
+        span = day == null ? null : _t('every ${ZoeDate.weekday(day)}', 'tuwing ${_tlWeekday(day)}');
+      case 'monthly':
+        span = day == null
+            ? null
+            : _t('every month (day ${day.day})', 'buwan-buwan (ika-${day.day})');
+      default:
+        span = day == null ? null : ZoeDate.short(day);
+    }
+    final out = [if (span != null) span, if (time != null) time].join(', ');
+    if (!d.done) return out;
+    return out.isEmpty ? doneMark : '$out ($doneMark)';
+  }
+
+  static const _tlWeekdays = [
+    'Lunes', 'Martes', 'Miyerkules', 'Huwebes', 'Biyernes', 'Sabado', 'Linggo',
+  ];
+
+  static String _tlWeekday(DateTime d) => _tlWeekdays[d.weekday - 1];
+
+  /// 'yyyy-MM-dd' → araw. Mali / wala → null (hindi nagka-crash ang sagot).
+  static DateTime? _parseDay(String? key) {
+    if (key == null || key.isEmpty) return null;
+    try {
+      return ZoeDate.parseKey(key);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 'HH:mm' → "3:00 PM". Mali / wala → null.
+  static String? _parseTime(String? hhmm) {
+    if (hhmm == null || hhmm.isEmpty) return null;
+    try {
+      return ZoeDate.prettyTime(ZoeDate.parseTime(hhmm));
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Memory Recall (code, walang Qwen). OFF ang long-term memory / pumalya → null.
   Future<RecallHit?> _recall(String lower) async {

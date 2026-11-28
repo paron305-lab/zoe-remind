@@ -162,7 +162,9 @@ void main() {
       final search = _FakeSearch(docs);
       await ask(brainWith(_FakeQwen('search_notes'), search: search), q);
       expect(search.searched.first, contains('gamot'));
-      expect(search.searched.first, contains('tungkol'));
+      expect(search.searched.first, contains('mama'));
+      // R4: "tungkol" = stopword na (gaya ng "about") → hindi na hinahanap.
+      expect(search.searched.first, isNot(contains('tungkol')));
     });
 
     test('walang nahanap → tapat na "wala", may salitang hinanap, nasa Hindi nahanap', () async {

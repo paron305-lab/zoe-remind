@@ -38,6 +38,19 @@ enum ZoeSituation {
   /// R2: gaya ng [noteMaybe], pero galing sa memories. {memory}.
   memoryMaybe,
 
+  /// R4: ang sagot ay isang reminder. {item} = title + kailan
+  /// ("Dentist appointment — Dec 3, 3:00 PM").
+  reminderFound,
+
+  /// R4: reminder pero hindi sigurado → "Baka ito? 🤔 …". {item}.
+  reminderMaybe,
+
+  /// R4: ang sagot ay isang task. {item} = title + kailan / tapos na.
+  taskFound,
+
+  /// R4: task pero hindi sigurado → "Baka ito? 🤔 …". {item}.
+  taskMaybe,
+
   /// RAG: "tandaan mo na mas gusto ko…" pero OFF ang long-term memory →
   /// iaalok na i-save na lang bilang note (may card pagkatapos).
   memoryOff,
@@ -439,6 +452,26 @@ class ZoeLines {
       ZoeLanguage.english: ['Not sure, but is this it? 🤔 You told me: {memory}'],
       ZoeLanguage.tagalog: ['Baka ito? 🤔 Sinabi mo sa akin: {memory}'],
       ZoeLanguage.both: ['Baka ito? 🤔 Sabi mo sa akin: {memory}'],
+    },
+    ZoeSituation.reminderFound: {
+      ZoeLanguage.english: ['You have a reminder: {item}'],
+      ZoeLanguage.tagalog: ['May paalala ka: {item}'],
+      ZoeLanguage.both: ['May reminder ka: {item}'],
+    },
+    ZoeSituation.reminderMaybe: {
+      ZoeLanguage.english: ['Not sure, but is this it? 🤔 You have a reminder: {item}'],
+      ZoeLanguage.tagalog: ['Baka ito? 🤔 May paalala ka: {item}'],
+      ZoeLanguage.both: ['Baka ito? 🤔 May reminder ka: {item}'],
+    },
+    ZoeSituation.taskFound: {
+      ZoeLanguage.english: ['You have a task: {item}'],
+      ZoeLanguage.tagalog: ['May gawain ka: {item}'],
+      ZoeLanguage.both: ['May task ka: {item}'],
+    },
+    ZoeSituation.taskMaybe: {
+      ZoeLanguage.english: ['Not sure, but is this it? 🤔 You have a task: {item}'],
+      ZoeLanguage.tagalog: ['Baka ito? 🤔 May gawain ka: {item}'],
+      ZoeLanguage.both: ['Baka ito? 🤔 May task ka: {item}'],
     },
     ZoeSituation.memoryOff: {
       ZoeLanguage.english: [

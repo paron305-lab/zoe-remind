@@ -4,12 +4,14 @@ import 'package:zoe_remind/features/chat/controllers/chat_router.dart';
 import 'package:zoe_remind/rag/query_terms.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
+import 'package:zoe_remind/rag/search_scope.dart';
 
 /// Takbuhin:  flutter test test/rag/retriever_test.dart
 ///
 /// B2: scoring ng Retriever. Walang database — fake SearchRepository na
 /// ibinabalik lahat ng docs (ang Retriever ang sumasala at nagsi-score).
 /// R2: IDF, synonym na mas magaan, magkatabi, coverage → strong / maybe / wala.
+/// R4: reminders + tasks — walang title bonus / maikling bonus; scope.
 class _FakeSearch extends SearchRepository {
   _FakeSearch(this.docs);
   final List<RetrievalDoc> docs;
@@ -265,6 +267,58 @@ void main() {
         ];
         expect(ids(rank('ano wifi password ko?', two, CorpusStats.unknown)), [1, 3]);
       });
+    });
+  });
+
+  group('R4 — reminders + tasks', () {
+    RetrievalDoc reminder(int id, String title, {int daysAgo = 3}) => RetrievalDoc(
+          source: RetrievalSource.reminder,
+          id: id,
+          title: title,
+          text: '',
+          updatedAt: now.subtract(Duration(days: daysAgo)),
+        );
+
+    List<RetrievalHit> answer(String q, List<RetrievalDoc> all) =>
+        Retriever.rankFor(SearchScope.of(ChatRouter.clean(q)), all, now: now);
+
+    final bills = note(10, 'Bills', 'Paid Meralco Nov 15', daysAgo: 13);
+    final payMeralco = reminder(11, 'Bayaran ang Meralco', daysAgo: 30);
+    final dentistNote = note(1, 'Dentist', 'Dr. Santos 0917 555 1234');
+    final dentistReminder = reminder(2, 'Dentist appointment');
+
+    test('maikling reminder ay hindi laging tatalo sa note ("na-pay ko na ba yung meralco?")', () {
+      // Walang title bonus at walang "maikli" na bonus ang reminder (title lang
+      // ito) — kung meron, "Bayaran ang Meralco" ang mauuna kahit note ang sagot.
+      final hits = answer('na-pay ko na ba yung meralco?', [bills, payMeralco]);
+      expect(ids(hits), [10, 11]);
+      expect(hits[1].matchedInTitle, 0);
+    });
+
+    test('"may reminder ba ako tungkol sa dentist?" → reminder lang (hindi ang note)', () {
+      final hits = answer('may reminder ba ako tungkol sa dentist?', [dentistNote, dentistReminder]);
+      expect(hits.single.doc.source, RetrievalSource.reminder);
+      expect(hits.single.isSure, isTrue);
+    });
+
+    test('walang uri sa tanong → lahat ("kailan ang dentist appointment ko?")', () {
+      final hits = answer('kailan ang dentist appointment ko?', [dentistNote, dentistReminder]);
+      expect(ids(hits), [2, 1]);
+      expect(hits.first.isSure, isTrue);
+      expect(hits[1].isSure, isFalse);
+    });
+
+    test('walang tumama sa uri → lahat, kasama ang salitang uri ("anong reminders gusto ko?")', () {
+      final hits = answer('anong reminders gusto ko?', [docs.last, dentistReminder]);
+      expect(ids(hits), [6]); // memory: "Mas gusto ko ng morning reminders"
+    });
+
+    test('search(): reminders galing sa repository + scope', () async {
+      final r = Retriever(repo: _FakeSearch([...docs, dentistNote, dentistReminder]), clock: () => now);
+      final hits = await r.search('may reminder ba ako tungkol sa dentist?');
+      expect(hits.single.doc.id, 2);
+      expect((await r.search('dentist')).map((h) => h.doc.source).toSet(),
+          {RetrievalSource.note, RetrievalSource.reminder});
     });
   });
 }

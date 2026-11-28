@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zoe_remind/features/chat/controllers/chat_router.dart';
-import 'package:zoe_remind/rag/query_terms.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
 import 'package:zoe_remind/rag/retriever.dart';
+import 'package:zoe_remind/rag/search_scope.dart';
 
 /// Takbuhin:  flutter test test/rag/rag_bench_test.dart
 ///
@@ -10,8 +10,10 @@ import 'package:zoe_remind/rag/retriever.dart';
 ///
 /// R0 — sukatan ng RAG. Walang database, walang phone, walang Qwen:
 /// ang tanong ay dumadaan sa parehong daan ng Zoe Chat
-/// (ChatRouter.clean → QueryTerms.parse → Retriever.rank), tapos tinitingnan
-/// kung tama ang lumabas.
+/// (ChatRouter.clean → SearchScope / QueryTerms.parse → Retriever.rankFor),
+/// tapos tinitingnan kung tama ang lumabas.
+///
+/// R4: kasama na ang reminders + tasks sa hinahanap (title lang).
 ///
 ///   hit@1   = tama ang UNANG sagot (ito ang nakikita ng user)
 ///   hit@3   = nasa top 3 ang tama
@@ -28,31 +30,35 @@ import 'package:zoe_remind/rag/retriever.dart';
 class BenchFloor {
   BenchFloor._();
 
-  /// R2 (BM25-style + kumpiyansa): 123 / 156 tama sa #1.
-  /// (R1: 119 · R0 baseline, repo 7f0f8d8: 100.)
-  static const hit1 = 123;
+  /// R4 (search everything — reminders + tasks): 138 / 156 tama sa #1.
+  /// (R2/R3: 123 · R1: 119 · R0 baseline, repo 7f0f8d8: 100.)
+  static const hit1 = 138;
 
-  /// R2: 126 / 156 nasa top 3. (R1: 126 · R0: 113.)
-  static const hit3 = 126;
+  /// R4: 142 / 156 nasa top 3. (R2/R3: 126 · R1: 126 · R0: 113.)
+  static const hit3 = 142;
 
-  /// R2: 9 / 20 tapat na "wala". Ang 11 na iba ay "Baka ito? 🤔" na lahat
-  /// (hindi na ipinipilit). (R1: 9 · R0: 9.)
+  /// R4: 9 / 20 tapat na "wala". Ang 11 na iba ay "Baka ito? 🤔" na lahat
+  /// (hindi na ipinipilit). (R2: 9 · R1: 9 · R0: 9.)
   static const honest = 9;
 
   /// R2: hanggang ilan lang ang SIGURADO pero mali. Hindi dapat tumaas.
-  /// (R1: 33 — lahat ng sagot noon ay sigurado.)
+  /// (R4: 1 pa rin · R1: 33 — lahat ng sagot noon ay sigurado.)
   static const maxSureWrong = 1;
 }
 
 /// Isang araw na hindi nagbabago (para sa "bago" na bonus ng Retriever).
 final _now = DateTime(2026, 11, 27, 9, 0);
 
-/// R0: note + memory lang ang hinahanap. R4: idagdag ang reminder + task
-/// (kailangan munang may RetrievalSource.reminder / task).
-const _searchable = {BenchKind.note, BenchKind.memory};
+/// R4: lahat na ang hinahanap (R0–R3: note + memory lang).
+const _searchable = {BenchKind.note, BenchKind.memory, BenchKind.reminder, BenchKind.task};
 
 /// Ginagawang RetrievalDoc ang BenchDoc — kapareho ng RetrievalDoc.noteRow /
-/// memoryRow. Ang id ay posisyon sa [benchDocs] (simula sa 1).
+/// memoryRow / reminderRow / taskRow. Ang id ay posisyon sa [benchDocs]
+/// (simula sa 1).
+///
+/// R4: reminder / task = title lang ang hinahanap (gaya ng app: walang laman
+/// ang text ng reminder, at walang description ang mga task dito). Ang
+/// [BenchDoc.text] nila ay paalala lang kung kailan (hal. "Dec 3, 3:00 PM").
 List<RetrievalDoc> _retrievalDocs() {
   final out = <RetrievalDoc>[];
   for (var i = 0; i < benchDocs.length; i++) {
@@ -66,6 +72,14 @@ List<RetrievalDoc> _retrievalDocs() {
         title: RetrievalDoc.shortTitle(d.text),
         text: d.text,
         importance: d.importance,
+        updatedAt: updated,
+      ));
+    } else if (d.kind == BenchKind.reminder || d.kind == BenchKind.task) {
+      out.add(RetrievalDoc(
+        source: d.kind == BenchKind.reminder ? RetrievalSource.reminder : RetrievalSource.task,
+        id: i + 1,
+        title: d.title,
+        text: '',
         updatedAt: updated,
       ));
     } else {
@@ -84,11 +98,13 @@ List<RetrievalDoc> _retrievalDocs() {
 }
 
 /// Top 3 na sagot sa tanong (walang laman = walang nahanap).
-/// Ang [docs] ay LAHAT ng note + memory, kaya walang CorpusStats (eksakto ang IDF).
+/// Ang [docs] ay LAHAT ng note + memory + reminder + task, kaya walang
+/// CorpusStats (eksakto ang IDF). R4: Retriever.rankFor — kapag may
+/// "reminder" / "task" sa tanong, sa uring iyon muna.
 List<RetrievalHit> _answer(String question, List<RetrievalDoc> docs) {
-  final terms = QueryTerms.parse(ChatRouter.clean(question));
-  if (terms.isEmpty) return const [];
-  return Retriever.rank(terms, docs, now: _now).take(3).toList();
+  final scope = SearchScope.of(ChatRouter.clean(question));
+  if (scope.all.isEmpty) return const [];
+  return Retriever.rankFor(scope, docs, now: _now).take(3).toList();
 }
 
 String _key(RetrievalHit h) => benchDocs[h.doc.id - 1].key;
@@ -231,8 +247,8 @@ void main() {
 // 77 docs (note 42, memory 13, reminder 12, task 10) · 176 tanong
 // (exact 28, synonym 19, affixTl 22, inflectEn 23, taglish 18, paraphrase 18, remTask 16, nothing 20, textspeak 12)
 
-/// Saan galing ang doc. Sa R0, note + memory lang ang hinahanap ng Retriever;
-/// ang reminder + task ay idadagdag sa R4.
+/// Saan galing ang doc. R0–R3: note + memory lang ang hinahanap ng Retriever;
+/// R4: kasama na ang reminder + task.
 enum BenchKind { note, memory, reminder, task }
 
 /// Anong klase ng tanong — para makita kung saan gumaganda bawat step.

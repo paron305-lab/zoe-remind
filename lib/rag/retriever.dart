@@ -3,17 +3,30 @@ import 'dart:math' as math;
 import 'package:zoe_remind/database/repositories/search_repository.dart';
 import 'package:zoe_remind/rag/query_terms.dart';
 import 'package:zoe_remind/rag/rag_models.dart';
+import 'package:zoe_remind/rag/search_scope.dart';
 import 'package:zoe_remind/rag/stemmer.dart';
 
-/// RAG retrieval (deterministic): hinahanap sa notes + memories ang sagot.
+/// RAG retrieval (deterministic): hinahanap sa notes, memories, reminders at
+/// tasks ang sagot.
 ///
-///   1. QueryTerms  → mga salita sa tanong (walang "ano", "ko", "the"…)
-///                    + ugat (R1: "bumili" → bili) + synonyms
-///   2. SearchRepository → mga kandidato (FTS4, o LIKE kung walang FTS4)
-///                    + bilang ng lahat ng notes at ng may bawat salita (R2)
-///   3. [rank]      → score + kumpiyansa, pinakamataas muna
+///   1. SearchScope → mga salita sa tanong (QueryTerms: walang "ano", "ko",
+///                    "the"… + ugat (R1) + synonyms) at kung may binanggit na
+///                    uri ("reminder", "task", "note") — R4
+///   2. SearchRepository → mga kandidato (FTS4, o LIKE kung walang FTS4;
+///                    R4: + reminders + tasks) + bilang ng lahat (R2)
+///   3. [rankFor]   → score + kumpiyansa, pinakamataas muna
 ///
-/// Walang AI dito. Ang sagot ni Zoe ay ang note / memory mismo + ang source.
+/// Walang AI dito. Ang sagot ni Zoe ay ang note / memory / reminder / task
+/// mismo + ang source.
+///
+/// R4 — search everything:
+///   • Reminder / task = title lang (walang body) → walang title bonus at
+///     walang "maikling note" bonus (haba = karaniwan). Kung wala ito, ang
+///     maikling "Bayaran ang Meralco" ay laging tatalo sa note na
+///     "Paid Meralco Nov 15" kahit ang note ang sagot.
+///   • May binanggit na uri ("may reminder ba ako tungkol sa dentist?") →
+///     sa uring iyon muna hahanapin (walang salitang "reminder"). Walang
+///     nahanap → lahat, gaya ng dati.
 ///
 /// R2 — ranking + kumpiyansa:
 ///   • Bigat ng salita = IDF: bihirang salita ("admin", "renta") > karaniwan
@@ -81,7 +94,8 @@ class Retriever {
     bool includeMemories = true,
     int limit = 3,
   }) async {
-    final terms = QueryTerms.parse(question);
+    final scope = SearchScope.of(question);
+    final terms = scope.all;
     if (terms.isEmpty) return const [];
     final docs = await _repo.candidates(terms, includeMemories: includeMemories);
     if (docs.isEmpty) return const [];
@@ -93,9 +107,46 @@ class Retriever {
     }
     // Kandidato lang ang hawak dito (hindi lahat ng notes) → kapag hindi alam
     // ang laki, tinatantiya sa [rank].
-    return rank(terms, docs, now: _clock(), stats: stats ?? CorpusStats.unknown)
-        .take(limit)
-        .toList();
+    return rankFor(
+      scope,
+      docs,
+      now: _clock(),
+      stats: stats ?? CorpusStats.unknown,
+      kindTotals: _repo.itemTotals,
+    ).take(limit).toList();
+  }
+
+  /// R4 — pure (walang database): [rank], pero kapag may binanggit na uri
+  /// ([SearchScope.isScoped]) ay sa uring iyon muna, gamit ang
+  /// [SearchScope.topic] (walang salitang "reminder" / "task"). Walang
+  /// tumama roon → lahat, gamit ang [SearchScope.all].
+  ///
+  /// [stats] = null → ang [docs] ang LAHAT (bench, tests) — eksakto ang IDF.
+  /// Kapag may [stats] (totoong search, kandidato lang ang [docs]):
+  /// [kindTotals] = ilan lahat ang reminders / tasks (para sa IDF sa loob ng
+  /// uri). Walang alam → tinatantiya.
+  static List<RetrievalHit> rankFor(
+    SearchScope scope,
+    Iterable<RetrievalDoc> docs, {
+    required DateTime now,
+    CorpusStats? stats,
+    Map<RetrievalSource, int> kindTotals = const {},
+  }) {
+    final list = docs.toList();
+    final kinds = scope.kinds;
+    if (kinds != null && scope.topic.isNotEmpty) {
+      final sub = [for (final d in list) if (kinds.contains(d.source)) d];
+      if (sub.isNotEmpty) {
+        CorpusStats? subStats;
+        if (stats != null) {
+          final n = kinds.fold<int>(0, (a, k) => a + (kindTotals[k] ?? 0));
+          subStats = n > 0 ? CorpusStats(docCount: n) : CorpusStats.unknown;
+        }
+        final hits = rank(scope.topic, sub, now: now, stats: subStats);
+        if (hits.isNotEmpty) return hits;
+      }
+    }
+    return rank(scope.all, list, now: now, stats: stats);
   }
 
   /// Pure scoring (walang database) — nate-test sa test/rag/retriever_test.dart
@@ -164,7 +215,10 @@ class Retriever {
       }
       if (!quality.any((q) => q > 0)) continue;
 
-      final lengthNorm = k1 * (1 - b + b * p.tokens.length / avgLen);
+      // R4: reminder / task = title lang → karaniwang haba (walang bonus
+      // sa pagiging maikli).
+      final length = d.isItem ? avgLen : p.tokens.length;
+      final lengthNorm = k1 * (1 - b + b * length / avgLen);
       var matchedWeight = 0.0;
       var score = 0.0;
       var matched = 0;
@@ -175,7 +229,9 @@ class Retriever {
         matchedWeight += weights[i] * quality[i];
         final tf = pos[i].length;
         score += weights[i] * quality[i] * tf * (k1 + 1) / (tf + lengthNorm);
-        if (!d.isMemory && pos[i].any((x) => x < p.titleLength)) {
+        // Title bonus: notes lang (memory = walang title; R4: reminder / task
+        // = title lang, kaya walang saysay ang bonus).
+        if (d.isNote && pos[i].any((x) => x < p.titleLength)) {
           inTitle++;
           score += titleBoost * weights[i];
         }

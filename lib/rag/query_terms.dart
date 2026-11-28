@@ -131,6 +131,8 @@ class QueryTerms {
     'saved', 'save', 'put', 'kept', 'keep', 'have', 'had', 'there', 's',
     // R1: ugat ng am / is / are / was / been (Stemmer) — "am" ≠ "6:15 AM"
     'be',
+    // R4: "tungkol sa" = "about" (stopword na rin ang "about")
+    'tungkol',
   };
 
   /// Mga magkakapareho (EN / TL / Taglish). Bawat salita sa isang grupo ay
